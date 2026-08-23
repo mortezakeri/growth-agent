@@ -114,7 +114,7 @@ to that ORIGINAL tweet. Never reply to replies, comments, quoted tweets, or
 nested conversations.
 
 Hard rules:
-- Maximum 16 words. Count words before answering.
+- Maximum 15 words. Count words before answering.
 - Use lowercase by default.
 - Output only the reply text: no explanation, analysis, alternatives, prefix,
   quotation marks, or hashtags.
@@ -134,18 +134,34 @@ output the classification. For technical, opinion, news, product, AI, and
 educational tweets, prioritize a contextual response over a greeting. For an
 obvious morning/weekend tweet, a creative CT-native greeting is appropriate.
 
-For morning posts, rotate language and structure. Do not repeatedly open with
-gm, morning, anon, ser, rise, another day, building, or cooking. Draw naturally
-from CT concepts such as shipping, blocks, onchain life, charts, coffee,
-liquidity, builders, trenches, and the market, but never use them mechanically.
-Sometimes skip the greeting and use a clever observation, short joke, wordplay,
-reaction, or tiny continuation of the original thought.
+Every reply must begin with the REQUIRED OPENING supplied by the user. The
+openings rotate in this exact order: good morning; top of the morning; gmorning;
+gee eem; g to your em; rise and shine; grand rising; awesome morning. Keep the
+first two especially warm and natural, in the spirit of "good morning legend,
+wish you an awesome day ahead" and "top of the morning champ, hope your day
+started great". These examples define the style, not fixed text to copy.
+
+When adding a wish or a phrase containing hope, place a natural CT address such
+as legend, champ, fren, friend, degen, ser, anon, or builder immediately before
+the wish/hope section. Rotate these addresses and never force one when it makes
+the sentence awkward. Connect the rest of the reply to the original tweet.
 
 Look for wordplay in the original tweet. Match jokes instead of forcing a
 serious response. Before answering, silently verify that the reply is human,
 relevant to the original tweet, adds something small, is at most 16 words,
-does not repeat a recent structure supplied by the user, and does not feel
+does not repeat a recent structure supplied by the user, is at most 15 words, and does not feel
 forced. Rewrite if needed; otherwise output SKIP."""
+
+GREETING_OPENINGS = (
+    "good morning",
+    "top of the morning",
+    "gmorning",
+    "gee eem",
+    "g to your em",
+    "rise and shine",
+    "grand rising",
+    "awesome morning",
+)
 
 STYLE_INSTRUCTIONS = {
     "witty": "Be witty and playful; light wordplay is welcome.",
@@ -170,7 +186,7 @@ def _system_prompt() -> str:
     return "\n".join(parts)
 
 
-def _clean_reply(text: str, max_words: int = 16) -> str:
+def _clean_reply(text: str, max_words: int = 15) -> str:
     """Normalize output; enforce no emoji and the word cap in code."""
     cleaned = re.sub(
         "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\u200d\ufe0f]",
@@ -178,6 +194,16 @@ def _clean_reply(text: str, max_words: int = 16) -> str:
     )
     cleaned = " ".join(cleaned.strip().strip('"').split())
     return " ".join(cleaned.split()[:max_words]).strip()
+
+
+def _next_greeting_opening(recent_replies: list[str] | None) -> str:
+    """Continue the configured opening rotation; a fresh history starts first."""
+    recent = [r.strip().lower() for r in (recent_replies or []) if r.strip()]
+    for reply in reversed(recent):
+        for index, opening in enumerate(GREETING_OPENINGS):
+            if reply == opening or reply.startswith(opening + " ") or reply.startswith(opening + ","):
+                return GREETING_OPENINGS[(index + 1) % len(GREETING_OPENINGS)]
+    return GREETING_OPENINGS[0]
 
 
 def generate_drafts_with_sources(author: str, tweet_text: str,
@@ -189,10 +215,13 @@ def generate_drafts_with_sources(author: str, tweet_text: str,
     rng = random.Random()
 
     recent = "\n".join(f"- {r}" for r in (recent_replies or [])[-12:])
+    required_opening = _next_greeting_opening(recent_replies)
     prompt = (
         f"ORIGINAL TWEET by @{author}:\n{tweet_text}\n\n"
         + (f"RECENT REPLIES — avoid their openings and structures:\n{recent}\n\n" if recent else "")
-        + "Return only one reply, or SKIP."
+        + f"REQUIRED OPENING: {required_opening}\n"
+        + "Write one contextual reply beginning exactly with that opening. "
+          "Maximum 15 words. Return only the reply, or SKIP."
     )
     out: dict[str, str] = {}
     sources: dict[str, str] = {}
@@ -204,7 +233,7 @@ def generate_drafts_with_sources(author: str, tweet_text: str,
             maybe_style, _, maybe_body = raw.partition(":")
             if maybe_style.strip().lower().replace("-", "_") in styles:
                 raw = maybe_body
-        cleaned = _clean_reply(raw, max_words=16)
+        cleaned = _clean_reply(raw, max_words=15)
         if cleaned.upper() == "SKIP":
             for style in styles:
                 out[style], sources[style] = "SKIP", "llm_skip"

@@ -23,7 +23,9 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      REPLY_DRY_RUN: false
+      # Deployments and manual checks are safe. Only scheduled passes can post,
+      # and runner.py --scheduled also honors the Telegram pause state.
+      REPLY_DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || 'true' }}
 
     steps:
       - name: Check out repository

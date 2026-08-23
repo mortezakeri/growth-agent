@@ -108,13 +108,18 @@ def test_provider_fallback_no_key(monkeypatch_dict=None):
 
 def test_creative_reply_prompt_and_hard_word_cap():
     prompt = nous_client.DRAFT_SYSTEM.lower()
-    for phrase in ("crypto twitter", "original tweet", "maximum 16 words",
-                   "output exactly: skip", "generic praise", "wordplay"):
+    for phrase in ("crypto twitter", "original tweet", "maximum 15 words",
+                   "output exactly: skip", "required opening", "top of the morning"):
         assert phrase in prompt
     raw = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen 🎨"
     cleaned = nous_client._clean_reply(raw)
-    assert len(cleaned.split()) == 16
-    assert "sixteen" in cleaned and "🎨" not in cleaned
+    assert len(cleaned.split()) == 15
+    assert "sixteen" not in cleaned and "🎨" not in cleaned
+
+    assert nous_client._next_greeting_opening([]) == "good morning"
+    assert nous_client._next_greeting_opening(
+        ["good morning legend, wish you an awesome day ahead"]
+    ) == "top of the morning"
 
 
 def test_draft_source_tracks_llm_vs_fallback():

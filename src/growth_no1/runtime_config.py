@@ -30,7 +30,7 @@ _DEFAULTS = {
     },
     "drafts": {
         "styles": ["gm", "observant", "curious", "dry_humor"],
-        "max_words": 16,
+        "max_words": 15,
         "skill_prompt": None,   # injected behavioral instructions
         "style_override": None, # witty | analytical | supportive | custom
     },
