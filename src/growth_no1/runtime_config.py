@@ -37,7 +37,7 @@ _DEFAULTS = {
     "provider": {
         "name": "gemini",
         "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "model": "gemini-2.5-flash-lite",
+        "model": "gemini-flash-latest",
         "api_key_env": "GEMINI_API_KEY",
     },
     "telegram": {"bot_token": None, "chat_id": None},
@@ -317,7 +317,7 @@ PROVIDER_DEFAULTS = {
     "gemini": {
         # OpenAI-compatible Gemini endpoint; key via GEMINI_API_KEY
         "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "model": "gemini-2.5-flash-lite",
+        "model": "gemini-flash-latest",
         "api_key_env": "GEMINI_API_KEY",
     },
 }

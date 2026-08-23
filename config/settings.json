@@ -17,14 +17,14 @@
     "max_words": 15,
     "lowercase": true,
     "no_emoji": true,
-    "batch_size": 10,
+    "batch_size": 3,
     "skill_prompt": null,
     "style_override": null
   },
   "provider": {
     "name": "gemini",
     "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    "model": "gemini-2.5-flash-lite",
+    "model": "gemini-flash-latest",
     "api_key_env": "GEMINI_API_KEY"
   },
   "reply": {
