@@ -109,7 +109,8 @@ def test_provider_fallback_no_key(monkeypatch_dict=None):
 def test_creative_reply_prompt_and_hard_word_cap():
     prompt = nous_client.DRAFT_SYSTEM.lower()
     for phrase in ("crypto twitter", "original tweet", "maximum 15 words",
-                   "output exactly: skip", "required opening", "top of the morning"):
+                   "output exactly: skip", "required opening", "top of the morning",
+                   "never use gendered", "including ser, sir"):
         assert phrase in prompt
     raw = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen 🎨"
     cleaned = nous_client._clean_reply(raw)
