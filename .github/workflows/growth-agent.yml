@@ -6,12 +6,6 @@ on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
-    inputs:
-      live_reply:
-        description: "Post exactly one live reply (manual runs only)"
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -29,9 +23,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      # Cron and ordinary pushes stay dry-run. Live mode requires either the
-      # manual opt-in or this exact one-shot commit message.
-      REPLY_DRY_RUN: ${{ ((github.event_name == 'workflow_dispatch' && inputs.live_reply) || (github.event_name == 'push' && github.event.head_commit.message == 'Run exactly one live reply test')) && 'false' || 'true' }}
+      REPLY_DRY_RUN: false
 
     steps:
       - name: Check out repository
@@ -96,7 +88,7 @@ jobs:
           path: data
           key: growth-state-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Upload dry-run evidence (screenshots + sanitized reports)
+      - name: Upload reply evidence when available
         if: always()
         uses: actions/upload-artifact@v6
         with:
