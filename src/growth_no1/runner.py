@@ -17,22 +17,20 @@ from drafts import ApprovalQueue, Draft, DraftGenerator  # noqa: E402
 from reply_agent import ReplyAgent  # noqa: E402
 from shift_quota import increment as increment_quota, used as quota_used  # noqa: E402
 import nous_client  # noqa: E402
+import cookies as cookie_store  # noqa: E402
 
 
 def load_settings() -> dict:
     return json.loads((ROOT / "config" / "settings.json").read_text(encoding="utf-8"))
 
 
-def load_cookies() -> dict:
-    auth_token = os.environ.get("X_AUTH_TOKEN")
-    ct0 = os.environ.get("X_CT0")
-    if auth_token and ct0:
-        return {"auth_token": auth_token, "ct0": ct0}
-    p = ROOT / "data" / "cookies.json"
-    if not p.exists():
-        print("No data/cookies.json — create it with {\"auth_token\": ..., \"ct0\": ...}")
-        return {}
-    return json.loads(p.read_text(encoding="utf-8"))
+def load_cookies() -> list[dict]:
+    """Cookie Editor V3 export from X_COOKIES_JSON, or data/cookies.json fallback."""
+    try:
+        return cookie_store.load_cookie_source()
+    except cookie_store.CookieError as e:
+        print(f"cookie error: {e}")
+        return []
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -70,8 +68,13 @@ def run_pass(cfg: dict, window_name: str | None = None) -> dict[str, int]:
     queue = ApprovalQueue(ROOT / "data" / "drafts.jsonl")
     gen = DraftGenerator()
     provider = cfg.get("provider", {})
-    use_llm = bool(provider.get("api_key") or
-                   os.environ.get(provider.get("api_key_env", "NOUS_API_KEY")))
+    try:
+        import runtime_config
+        _key, _src = runtime_config.get_active_api_key()
+        use_llm = bool(_key)
+    except Exception:
+        use_llm = bool(provider.get("api_key") or
+                       os.environ.get(provider.get("api_key_env", ""), ""))
     query = " OR ".join(cfg["scout"]["keywords"][:4])
     tweets = engine.search(query, limit=cfg["scout"]["max_tweets_per_session"])
     save_candidates(tweets, ROOT / "data" / "candidates.json")

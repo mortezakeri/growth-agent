@@ -1,5 +1,6 @@
 cookies.json
 data/cookies.json
+config/secrets.json
 __pycache__/
 *.pyc
 .venv/

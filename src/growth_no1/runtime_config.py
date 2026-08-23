@@ -119,32 +119,96 @@ def set_skill(prompt_text: str | None, style_override: str | None = None) -> dic
     return save(m)
 
 
-def set_provider(name: str, api_key: str, endpoint: str | None = None) -> dict:
-    """Persist the live provider. Callers must never echo the unmasked key."""
+PROVIDER_DEFAULTS = {
+    "nous": {
+        "endpoint": "https://inference-api.nousresearch.com/v1/chat/completions",
+        "model": "ox-alpha",
+        "api_key_env": "NOUS_API_KEY",
+    },
+    "openrouter": {
+        "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+        "model": None,
+        "api_key_env": "OPENROUTER_API_KEY",
+    },
+    "gemini": {
+        # OpenAI-compatible Gemini endpoint; key via GEMINI_API_KEY
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "model": "gemini-3.6-flash",
+        "api_key_env": "GEMINI_API_KEY",
+    },
+}
+
+# Gitignored store for runtime API keys set via Telegram. Never committed.
+SECRETS_PATH = ROOT / "config" / "secrets.json"
+
+
+def _read_secrets() -> dict:
+    if SECRETS_PATH.exists():
+        try:
+            return json.loads(SECRETS_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _write_secrets(data: dict) -> None:
+    SECRETS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SECRETS_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(SECRETS_PATH)
+
+
+def mask_key(key: str) -> str:
+    if not key:
+        return "(not set)"
+    if len(key) <= 8:
+        return "(set)"
+    return f"{key[:4]}…{key[-4:]}"
+
+
+def set_provider(name: str, api_key: str | None = None,
+                 endpoint: str | None = None, model: str | None = None) -> dict:
+    """Persist public provider identity to settings.json; the KEY goes only to
+    the gitignored config/secrets.json."""
     def m(cfg):
         p = cfg["provider"]
         provider = name.strip().lower()
+        defaults = PROVIDER_DEFAULTS.get(provider, {})
         p["name"] = provider
-        p["api_key"] = api_key.strip()
-        p["api_key_env"] = ("NOUS_API_KEY" if provider == "nous" else
-                            f"{provider.upper()}_API_KEY")
+        p["api_key_env"] = defaults.get("api_key_env", f"{provider.upper()}_API_KEY")
         if endpoint:
             p["endpoint"] = endpoint.strip()
-        elif provider == "nous":
-            p["endpoint"] = "https://inference-api.nousresearch.com/v1/chat/completions"
-        elif provider == "openrouter":
-            p["endpoint"] = "https://openrouter.ai/api/v1/chat/completions"
-    return save(m)
+        elif defaults.get("endpoint"):
+            p["endpoint"] = defaults["endpoint"]
+        if model:
+            p["model"] = model.strip()
+        elif defaults.get("model"):
+            p["model"] = defaults["model"]
+    cfg = save(m)
+    if api_key:
+        secrets = _read_secrets()
+        secrets[name.strip().lower()] = api_key.strip()
+        _write_secrets(secrets)
+    return cfg
+
+
+def get_active_api_key() -> tuple[str | None, str]:
+    """(key, source) — secrets.json first, then env var of the active provider."""
+    import os
+    p = load()["provider"]
+    key = _read_secrets().get(p["name"])
+    if key:
+        return key, "secrets.json"
+    key = os.environ.get(p["api_key_env"], "")
+    return (key, "env") if key else (None, "none")
 
 
 def masked_summary() -> str:
     cfg = load()
     p = cfg["provider"]
-    import os
-    key = p.get("api_key") or os.environ.get(p["api_key_env"], "")
-    masked = (key[:4] + "…" + key[-4:]) if len(key) > 8 else ("(set)" if key else "(not set)")
+    key, source = get_active_api_key()
     d = cfg["drafts"]
     return (f"provider: {p['name']}\nendpoint: {p['endpoint']}\nmodel: {p['model']}\n"
-            f"key ({p['api_key_env']}): {masked}\n"
+            f"key ({p['api_key_env']}, {source}): {mask_key(key)}\n"
             f"style: {d.get('style_override') or '(default styles)'}\n"
             f"skill_prompt: {(d.get('skill_prompt') or '(none)')[:120]}")

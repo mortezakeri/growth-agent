@@ -23,11 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
-      X_CT0: ${{ secrets.X_CT0 }}
+      X_COOKIES_JSON: ${{ secrets.X_COOKIES_JSON }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
       REPLY_DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run == true) || (github.event_name == 'schedule' && vars.LIVE_REPLIES != 'true') }}
 
     steps:

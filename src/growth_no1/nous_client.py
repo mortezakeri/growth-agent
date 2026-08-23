@@ -24,14 +24,20 @@ def _active_provider() -> dict:
 
 
 def _resolve_key_and_endpoint() -> tuple[str, str, str]:
-    """Returns (key, endpoint, model) from live persisted config or env."""
+    """Returns (key, endpoint, model) from secrets.json / env, or raises."""
     prov = _active_provider()
-    key = prov.get("api_key") or os.environ.get(prov.get("api_key_env") or "", "")
-    if not key:
-        raise RuntimeError(
-            f"no API key for provider '{prov['name']}' "
-            f"(env {prov.get('api_key_env')} or /set_api)")
-    return key, prov.get("endpoint", NOUS_BASE_URL), prov.get("model", NOUS_MODEL)
+    try:
+        import runtime_config
+        key, _src = runtime_config.get_active_api_key()
+        if key:
+            return key, prov.get("endpoint", NOUS_BASE_URL), prov.get("model", NOUS_MODEL)
+    except Exception:
+        key = prov.get("api_key") or os.environ.get(prov.get("api_key_env") or "", "")
+        if key:
+            return key, prov.get("endpoint", NOUS_BASE_URL), prov.get("model", NOUS_MODEL)
+    raise RuntimeError(
+        f"no API key for provider '{prov['name']}' "
+        f"(env {prov.get('api_key_env')} or /set_api)")
 
 
 def _key() -> str:

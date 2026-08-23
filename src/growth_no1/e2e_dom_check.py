@@ -85,12 +85,9 @@ def _inspect(page, name: str, selector: str) -> SelectorReport:
 
 def verify_reply_dom(tweet_url: str, headless: bool = True) -> UrlReport:
     from playwright.sync_api import sync_playwright
+    import cookies as cookie_store
 
-    cookies_path = ROOT / "data" / "cookies.json"
-    if not cookies_path.exists():
-        raise FileNotFoundError(
-            f"{cookies_path} missing — create it with auth_token + ct0")
-    cookies = json.loads(cookies_path.read_text(encoding="utf-8"))
+    cookies = cookie_store.load_cookie_source()
 
     report = UrlReport(url=tweet_url)
     with sync_playwright() as p:
@@ -105,11 +102,7 @@ def verify_reply_dom(tweet_url: str, headless: bool = True) -> UrlReport:
             route.abort() if route.request.method in BLOCKED_METHODS
             else route.continue_()
         ))
-        ctx.add_cookies([
-            {"name": n, "value": v, "domain": ".x.com", "path": "/",
-             "httpOnly": n == "auth_token", "secure": True}
-            for n, v in cookies.items()
-        ])
+        ctx.add_cookies(cookies)
         page = ctx.new_page()
         try:
             # Navigate straight to the reply composer via URL — no clicks.

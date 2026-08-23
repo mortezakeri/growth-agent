@@ -15,10 +15,17 @@ class ReplyAgent:
     TEXTAREA = "div[data-testid='tweetTextarea_0']"
     SEND_BUTTON = "button[data-testid='tweetButtonInline']"
 
-    def __init__(self, cookies: dict[str, str], headless: bool = True,
+    def __init__(self, cookies, headless: bool = True,
                  dry_run: bool = True, timeout_ms: int = 30_000):
-        if "auth_token" not in cookies or "ct0" not in cookies:
-            raise ValueError("both auth_token and ct0 cookies required")
+        # Accepts Playwright-style list-of-dicts or legacy {name: value} map.
+        if isinstance(cookies, dict):
+            cookies = [{"name": k, "value": v, "domain": ".x.com", "path": "/",
+                        "httpOnly": k == "auth_token", "secure": True}
+                       for k, v in cookies.items()]
+        names = {c.get("name") for c in cookies}
+        missing = {"auth_token", "ct0"} - names
+        if missing:
+            raise ValueError(f"missing required cookie(s): {', '.join(sorted(missing))}")
         self.cookies = cookies
         self.headless = headless
         self.dry_run = dry_run
@@ -32,11 +39,7 @@ class ReplyAgent:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=self.headless)
             ctx = browser.new_context(viewport={"width": 1280, "height": 900})
-            ctx.add_cookies([
-                {"name": name, "value": value, "domain": ".x.com", "path": "/",
-                 "httpOnly": name == "auth_token", "secure": True}
-                for name, value in self.cookies.items()
-            ])
+            ctx.add_cookies(self.cookies)  # already Playwright-shaped
             page = ctx.new_page()
             try:
                 page.goto(tweet_url, wait_until="domcontentloaded", timeout=self.timeout_ms)

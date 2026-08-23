@@ -224,12 +224,13 @@ async def cmd_set_api(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     endpoint = ctx.args[2] if len(ctx.args) > 2 else None
     cfg = runtime_config.set_provider(provider, key, endpoint)
     try:
-        await update.message.delete()
+        await update.message.delete()  # remove key from chat history
     except Exception:
         pass
     await ctx.bot.send_message(update.effective_chat.id,
         f"provider switched to {cfg['provider']['name']}\nendpoint: {cfg['provider']['endpoint']}\n"
-        f"key: {'*' * max(4, len(key) - 4)}{key[-4:]} (persisted)")
+        f"model: {cfg['provider']['model']}\n"
+        f"key: {runtime_config.mask_key(key)} (stored in gitignored config/secrets.json)")
 
 
 async def cmd_current_api(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:

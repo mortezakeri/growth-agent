@@ -46,11 +46,17 @@ class ScoutEngine:
 
     SEARCH_URL = "https://x.com/search?q={query}&f=live"
 
-    def __init__(self, cookies: dict[str, str], keywords: list[str],
+    def __init__(self, cookies, keywords: list[str],
                  min_interval_s: int = 240, max_interval_s: int = 720,
                  headless: bool = True):
-        if "auth_token" not in cookies or "ct0" not in cookies:
-            raise ValueError("both auth_token and ct0 cookies required")
+        # Accepts Playwright-style list-of-dicts or legacy {name: value} map.
+        if isinstance(cookies, dict):
+            cookies = [{"name": k, "value": v, "domain": ".x.com", "path": "/"}
+                       for k, v in cookies.items()]
+        names = {c.get("name") for c in cookies}
+        missing = {"auth_token", "ct0"} - names
+        if missing:
+            raise ValueError(f"missing required cookie(s): {', '.join(sorted(missing))}")
         self.cookies = cookies
         self.keywords = [k.lower() for k in keywords]
         self.interval = (min_interval_s, max_interval_s)
@@ -82,11 +88,7 @@ class ScoutEngine:
                 route.abort() if _is_x_mutation(route.request) else route.continue_()
             ))
             base_url = "https://x.com"
-            ctx.add_cookies([
-                {"name": n, "value": v, "domain": ".x.com", "path": "/",
-                 "httpOnly": n == "auth_token", "secure": True}
-                for n, v in self.cookies.items()
-            ])
+            ctx.add_cookies(self.cookies)  # already Playwright-shaped
             page = ctx.new_page()
             page.goto(self.SEARCH_URL.format(query=query), wait_until="domcontentloaded")
             page.wait_for_timeout(4000)

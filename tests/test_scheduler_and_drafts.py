@@ -1,4 +1,5 @@
 import sys
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -73,7 +74,9 @@ def test_vision_heuristic():
 
 def test_runtime_config_persistence(tmp_path):
     original = runtime_config.SETTINGS_PATH
+    original_secrets = runtime_config.SECRETS_PATH
     runtime_config.SETTINGS_PATH = tmp_path / "settings.json"
+    runtime_config.SECRETS_PATH = tmp_path / "secrets.json"
     try:
         runtime_config.set_window_limit("morning", 7)
         runtime_config.set_window_hours("evening", "13:15", "00:45")
@@ -83,10 +86,15 @@ def test_runtime_config_persistence(tmp_path):
         morning = next(w for w in cfg["working_windows"] if w["name"] == "morning")
         assert morning["max_replies"] == 7
         assert cfg["drafts"]["skill_prompt"] == "be precise"
-        assert cfg["provider"]["api_key"] == "secret-12345678"
+        assert cfg["provider"]["name"] == "openrouter"
+        # the key must live in gitignored secrets.json, never in settings.json
+        secrets = json.loads(runtime_config.SECRETS_PATH.read_text(encoding="utf-8"))
+        assert secrets["openrouter"] == "secret-12345678"
+        assert "secret-12345678" not in runtime_config.SETTINGS_PATH.read_text(encoding="utf-8")
         assert "secret-12345678" not in runtime_config.masked_summary()
     finally:
         runtime_config.SETTINGS_PATH = original
+        runtime_config.SECRETS_PATH = original_secrets
 
 
 if __name__ == "__main__":
