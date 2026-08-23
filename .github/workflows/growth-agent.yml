@@ -23,9 +23,9 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      # Deployments and manual checks are safe. Only scheduled passes can post,
-      # and runner.py --scheduled also honors the Telegram pause state.
-      REPLY_DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || 'true' }}
+      # Ordinary deployments stay safe. Cron and one exact operator-controlled
+      # bootstrap commit may start a bounded live session.
+      REPLY_DRY_RUN: ${{ (github.event_name == 'schedule' || (github.event_name == 'push' && github.event.head_commit.message == 'Start 50-minute live session')) && 'false' || 'true' }}
 
     steps:
       - name: Check out repository
@@ -55,11 +55,11 @@ jobs:
         id: gate
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" != "schedule" ]]; then
+          if [[ "${{ github.event_name }}" == "schedule" || "${{ github.event.head_commit.message }}" == "Start 50-minute live session" ]]; then
+            python src/growth_no1/runner.py --session-check >> "$GITHUB_OUTPUT"
+          else
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "reason=manual" >> "$GITHUB_OUTPUT"
-          else
-            python src/growth_no1/runner.py --session-check >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install Chromium
@@ -76,11 +76,11 @@ jobs:
           python tests/test_runtime_config_security.py
 
       - name: Run 50-minute scheduled agent session
-        if: github.event_name == 'schedule' && steps.gate.outputs.should_run == 'true'
+        if: (github.event_name == 'schedule' || github.event.head_commit.message == 'Start 50-minute live session') && steps.gate.outputs.should_run == 'true'
         run: python src/growth_no1/runner.py --session-minutes 50
 
       - name: Run validation agent pass
-        if: github.event_name != 'schedule'
+        if: github.event_name != 'schedule' && github.event.head_commit.message != 'Start 50-minute live session'
         run: python src/growth_no1/runner.py --once
 
       - name: Save reply history
