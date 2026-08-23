@@ -143,15 +143,16 @@ def run_pass(cfg: dict, window_name: str | None = None) -> dict[str, int]:
             skip_log.append({"id": t.id, "reason": gate["blocked_reason"]})
             continue
         if use_llm:
-            bodies = nous_client.generate_drafts(t.author, t.text, gen.styles)
+            bodies, draft_sources = nous_client.generate_drafts_with_sources(
+                t.author, t.text, gen.styles)
             drafts = gen.from_bodies(t.id, bodies)
-            draft_source = "llm"
         else:
             drafts = gen.generate(t.id, t.author or "friend", topic="web3")
-            draft_source = "local_fallback"
+            draft_sources = {d.style: "local_fallback" for d in drafts}
         added += queue.add(drafts)
         if replier and reply_attempts < max_replies and not queue.was_posted(t.id):
             chosen = next((d for d in drafts if d.style == preferred_style), drafts[0])
+            draft_source = draft_sources.get(chosen.style, "local_fallback")
             # This gate MUST precede ReplyAgent.reply(): in live mode that
             # method clicks Send before returning status="posted".
             if not delivery_allowed(draft_source, replier.dry_run):

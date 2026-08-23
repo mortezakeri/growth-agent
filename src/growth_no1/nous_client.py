@@ -145,8 +145,9 @@ def _clean_reply(text: str, max_words: int = 15) -> str:
     return " ".join(cleaned.split()[:max_words]).strip()
 
 
-def generate_drafts(author: str, tweet_text: str, styles: tuple[str, ...]) -> dict[str, str]:
-    """LLM-powered drafts; returns {style: body}. Falls back per-style on errors."""
+def generate_drafts_with_sources(author: str, tweet_text: str,
+                                 styles: tuple[str, ...]) -> tuple[dict[str, str], dict[str, str]]:
+    """Return draft bodies plus an accurate llm/local_fallback source per style."""
     from drafts import _TEMPLATES  # local templates as fallback
     import random
     rng = random.Random()
@@ -158,6 +159,7 @@ def generate_drafts(author: str, tweet_text: str, styles: tuple[str, ...]) -> di
         + "\nEach reply must follow the system rules."
     )
     out: dict[str, str] = {}
+    sources: dict[str, str] = {}
     try:
         raw = chat(prompt, system=_system_prompt())
         for line in raw.splitlines():
@@ -169,9 +171,16 @@ def generate_drafts(author: str, tweet_text: str, styles: tuple[str, ...]) -> di
                 cleaned = _clean_reply(body)
                 if cleaned:
                     out[style] = cleaned
+                    sources[style] = "llm"
     except Exception as e:
         print(f"[nous] draft generation failed ({e}); using templates")
     for s in styles:
         if s not in out:
             out[s] = rng.choice(_TEMPLATES[s]).format(author=author or "friend", topic="web3").lower()
-    return out
+            sources[s] = "local_fallback"
+    return out, sources
+
+
+def generate_drafts(author: str, tweet_text: str, styles: tuple[str, ...]) -> dict[str, str]:
+    """Backward-compatible bodies-only wrapper."""
+    return generate_drafts_with_sources(author, tweet_text, styles)[0]

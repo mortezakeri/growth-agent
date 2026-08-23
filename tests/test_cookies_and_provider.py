@@ -117,6 +117,19 @@ def test_creative_reply_prompt_and_hard_word_cap():
     assert "sixteen" not in cleaned and "🎨" not in cleaned
 
 
+def test_draft_source_tracks_llm_vs_fallback():
+    original = nous_client.chat
+    try:
+        nous_client.chat = lambda *_args, **_kwargs: "observant: this crypto prayer carries real conviction"
+        bodies, sources = nous_client.generate_drafts_with_sources(
+            "artist", "praying I make it in crypto", ("observant", "curious"))
+        assert sources["observant"] == "llm"
+        assert sources["curious"] == "local_fallback"
+        assert bodies["observant"] == "this crypto prayer carries real conviction"
+    finally:
+        nous_client.chat = original
+
+
 def test_masking_and_secrets_persistence(tmp_path=None):
     assert rc.mask_key("") == "(not set)"
     assert rc.mask_key("short") == "(set)"
@@ -134,7 +147,7 @@ def test_masking_and_secrets_persistence(tmp_path=None):
         p = cfg["provider"]
         assert p["name"] == "gemini"
         assert "generativelanguage.googleapis.com" in p["endpoint"]
-        assert p["model"] == "gemini-3.6-flash"
+        assert p["model"] == "gemini-2.5-flash-lite"
         assert p["api_key_env"] == "GEMINI_API_KEY"
         # key persisted ONLY in gitignored secrets file
         assert "test-key-gemini" not in rc.SETTINGS_PATH.read_text(encoding="utf-8")
