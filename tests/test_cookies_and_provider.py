@@ -147,7 +147,7 @@ def test_masking_and_secrets_persistence(tmp_path=None):
         p = cfg["provider"]
         assert p["name"] == "gemini"
         assert "generativelanguage.googleapis.com" in p["endpoint"]
-        assert p["model"] == "gemini-flash-latest"
+        assert p["model"] == "gemini-3.5-flash-lite"
         assert p["api_key_env"] == "GEMINI_API_KEY"
         # key persisted ONLY in gitignored secrets file
         assert "test-key-gemini" not in rc.SETTINGS_PATH.read_text(encoding="utf-8")

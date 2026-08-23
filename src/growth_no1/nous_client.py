@@ -8,6 +8,8 @@ import base64
 import json
 import os
 import re
+import time
+import urllib.error
 import urllib.request
 
 NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1/chat/completions"
@@ -45,7 +47,7 @@ def _key() -> str:
     return _resolve_key_and_endpoint()[0]
 
 
-def _post(payload: dict, timeout: int = 120) -> dict:
+def _post(payload: dict, timeout: int = 120, retries: int = 2) -> dict:
     key, endpoint, model = _resolve_key_and_endpoint()
     payload = dict(payload, model=model)
     req = urllib.request.Request(
@@ -57,8 +59,15 @@ def _post(payload: dict, timeout: int = 120) -> dict:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
-        return json.loads(r.read().decode("utf-8"))
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (429, 500, 502, 503, 504) or attempt >= retries:
+                raise
+            time.sleep(3 * (2 ** attempt))
+    raise RuntimeError("provider request failed")
 
 
 def chat(prompt: str, system: str = "You are a concise social media assistant.") -> str:
