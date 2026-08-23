@@ -137,6 +137,35 @@ def test_window_limit_persistence():
         assert "21:00" not in rc.SETTINGS_PATH.read_text(encoding="utf-8")
 
 
+def test_limit_picker_callback_then_number():
+    with cloud_isolation() as ctx:
+        rc.save_cloud_state(update_offset=0)
+        ctx.set_updates([_update(80, "/set_limit")])
+        assert tgo.process_once() == 1
+        picker = [payload for method, payload in ctx.tg_calls
+                  if method == "sendMessage" and "reply_markup" in payload]
+        assert picker and picker[-1]["text"] == "Choose the time window:"
+
+        ctx.sent.clear()
+        ctx.set_updates([{
+            "update_id": 81,
+            "callback_query": {
+                "id": "cb-1", "data": "limit:morning",
+                "message": {"chat": {"id": 111}},
+            },
+        }])
+        assert tgo.process_once() == 1
+        assert rc.load_cloud_state()["pending_limit_window"] == "morning"
+
+        ctx.sent.clear()
+        ctx.set_updates([_update(82, "9")])
+        assert tgo.process_once() == 1
+        morning = next(w for w in rc.load()["working_windows"]
+                       if w["name"] == "morning")
+        assert morning["max_replies"] == 9
+        assert rc.load_cloud_state()["pending_limit_window"] is None
+
+
 def test_skill_style_persistence():
     with cloud_isolation() as ctx:
         rc.save_cloud_state(update_offset=0)

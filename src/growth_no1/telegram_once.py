@@ -70,6 +70,32 @@ def _reply(token: str, chat_id: str, text: str) -> None:
     _tg(token, "sendMessage", {"chat_id": chat_id, "text": text[:4000]})
 
 
+def _limit_picker(token: str, chat_id: str) -> None:
+    buttons = []
+    for window in rc.load()["working_windows"]:
+        if window.get("name") in ("morning", "evening"):
+            label = f"{window['start']}–{window['end']}  (limit {window.get('max_replies', '?')})"
+            buttons.append([{"text": label,
+                             "callback_data": f"limit:{window['name']}"}])
+    _tg(token, "sendMessage", {
+        "chat_id": chat_id,
+        "text": "Choose the time window:",
+        "reply_markup": {"inline_keyboard": buttons},
+    })
+
+
+def _save_limit(window_name: str, number: int) -> bool:
+    windows = _windows_from_overlay(rc.load())
+    hit = False
+    for window in windows:
+        if window.get("name") == window_name:
+            window["max_replies"] = number
+            hit = True
+    if hit:
+        rc.save_cloud_state(working_windows=windows, pending_limit_window=None)
+    return hit
+
+
 def _windows_from_overlay(cfg: dict) -> list[dict]:
     return cfg["working_windows"]
 
@@ -126,6 +152,9 @@ def _handle_command(token: str, chat_id: str, text: str) -> str | None:
         rc.save_cloud_state(paused=False)
         return "resumed."
     if cmd == "/set_limit":
+        if not args:
+            _limit_picker(token, chat_id)
+            return None
         try:
             name, num = args[0], int(args[1])
             if not 0 <= num <= 100:
@@ -134,16 +163,8 @@ def _handle_command(token: str, chat_id: str, text: str) -> str | None:
             return "usage: /set_limit morning|evening <number 0-100>"
         name = {"morning": "morning", "evening": "evening",
                 "afternoon_night": "evening"}.get(name, name)
-        cfg = rc.load()
-        wins = _windows_from_overlay(cfg)
-        hit = False
-        for w in wins:
-            if w["name"] == name:
-                w["max_replies"] = num
-                hit = True
-        if not hit:
+        if not _save_limit(name, num):
             return f"unknown window '{name}'"
-        rc.save_cloud_state(working_windows=wins)
         return f"saved: {name} cap={num} (effective next run)"
     if cmd == "/set_window":
         if len(args) != 3:
@@ -238,11 +259,43 @@ def process_once(register_commands: bool = True) -> int:
         if uid is None or uid < offset or uid in seen_ids:
             continue  # dedupe: already handled
         seen_ids.add(uid)
-        msg = update.get("message") or update.get("edited_message") or {}
+        callback = update.get("callback_query") or {}
+        msg = update.get("message") or update.get("edited_message") or callback.get("message") or {}
         if str((msg.get("chat") or {}).get("id")) != str(chat_id):
             max_id = max(max_id, uid + 1)
             continue  # unauthorized chat: skip silently, still advance offset
+        if callback:
+            data_value = str(callback.get("data", ""))
+            if data_value in ("limit:morning", "limit:evening"):
+                window_name = data_value.split(":", 1)[1]
+                rc.save_cloud_state(pending_limit_window=window_name)
+                callback_id = callback.get("id")
+                if callback_id:
+                    _tg(token, "answerCallbackQuery", {"callback_query_id": callback_id})
+                window = next((w for w in rc.load()["working_windows"]
+                               if w.get("name") == window_name), {})
+                _reply(token, chat_id,
+                       f"Send the reply limit for {window.get('start')}–{window.get('end')} (0–100):")
+            max_id = max(max_id, uid + 1)
+            processed += 1
+            continue
+
         text = msg.get("text", "").strip()
+        pending_window = rc.load_cloud_state().get("pending_limit_window")
+        if pending_window and not text.startswith("/"):
+            try:
+                number = int(text)
+                if not 0 <= number <= 100:
+                    raise ValueError
+            except ValueError:
+                _reply(token, chat_id, "Send one number from 0 to 100.")
+            else:
+                if _save_limit(pending_window, number):
+                    _reply(token, chat_id,
+                           f"saved: {pending_window} limit={number} (effective next pass)")
+            max_id = max(max_id, uid + 1)
+            processed += 1
+            continue
         if text.startswith("/"):
             if text.lower().split(maxsplit=1)[0].split("@")[0] == "/set_api":
                 message_id = msg.get("message_id")

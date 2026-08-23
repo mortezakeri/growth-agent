@@ -70,6 +70,7 @@ CLOUD_RUNTIME_PATH = ROOT / "data" / "cloud_runtime.json"
 # metrics removed entirely: unrestricted nested dict, unused in runtime flow,
 # and too easy to smuggle secret-like strings under arbitrary metric names.
 _CLOUD_SAFE_KEYS = {"update_offset", "paused", "working_windows", "drafts",
+                    "pending_limit_window",
                     "last_run", "last_successful_run", "last_scout_count",
                     "last_error_summary", "updated_at"}
 
@@ -135,6 +136,9 @@ def _sanitize_cloud_state(raw) -> dict:
     error = raw.get("last_error_summary")
     if isinstance(error, str):
         out["last_error_summary"] = error[:300]
+    pending = raw.get("pending_limit_window")
+    if pending is None or pending in ("morning", "evening"):
+        out["pending_limit_window"] = pending
     if "drafts" in raw:
         out["drafts"] = _safe_drafts(raw["drafts"])
     if "working_windows" in raw:
@@ -205,6 +209,8 @@ def load_cloud_state() -> dict:
         if isinstance(state.get("last_scout_count"), (int, float)) else None,
         "last_error_summary": _safe_text(state.get("last_error_summary")),
         "updated_at": _safe_ts(state.get("updated_at")),
+        "pending_limit_window": state.get("pending_limit_window")
+        if state.get("pending_limit_window") in ("morning", "evening") else None,
     }
 
 
