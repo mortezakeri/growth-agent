@@ -6,6 +6,12 @@ on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+    inputs:
+      live_reply:
+        description: "Post exactly one live reply (manual runs only)"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,7 +29,9 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      REPLY_DRY_RUN: true
+      # Scheduled/push runs are always dry-run. Only an explicit manual opt-in
+      # can enable the already-configured one-reply-per-pass live path.
+      REPLY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.live_reply && 'false' || 'true' }}
 
     steps:
       - name: Check out repository
