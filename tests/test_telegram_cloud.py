@@ -227,6 +227,15 @@ def test_runner_honors_pause_and_overlay():
         assert e["max_replies"] == 7, "overlay windows must be visible to runner"
 
 
+def test_cloud_session_delay_bounds():
+    import random
+    import runner
+    initial, later = runner._session_delays(
+        {"read_interval_seconds": {"min": 240, "max": 720}}, random.Random(7))
+    assert 0 <= initial <= 120
+    assert all(240 <= later() <= 720 for _ in range(20))
+
+
 def test_overlay_load_merges_safely():
     with cloud_isolation():
         rc.save_cloud_state(drafts={"skill_prompt": "s", "style_override": "witty",

@@ -17,7 +17,7 @@ concurrency:
 jobs:
   run-agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 58
     env:
       X_COOKIES_JSON: ${{ secrets.X_COOKIES_JSON }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -59,7 +59,7 @@ jobs:
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "reason=manual" >> "$GITHUB_OUTPUT"
           else
-            python src/growth_no1/runner.py --scheduled-check >> "$GITHUB_OUTPUT"
+            python src/growth_no1/runner.py --session-check >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install Chromium
@@ -75,9 +75,9 @@ jobs:
           python tests/test_telegram_cloud.py
           python tests/test_runtime_config_security.py
 
-      - name: Run scheduled agent pass
+      - name: Run 50-minute scheduled agent session
         if: github.event_name == 'schedule' && steps.gate.outputs.should_run == 'true'
-        run: python src/growth_no1/runner.py --scheduled
+        run: python src/growth_no1/runner.py --session-minutes 50
 
       - name: Run validation agent pass
         if: github.event_name != 'schedule'

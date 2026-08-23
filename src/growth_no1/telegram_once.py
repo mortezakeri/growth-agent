@@ -211,7 +211,7 @@ def _handle_command(token: str, chat_id: str, text: str) -> str | None:
     return "unknown command. use /help"
 
 
-def process_once() -> int:
+def process_once(register_commands: bool = True) -> int:
     """Returns number of updates processed."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -221,7 +221,8 @@ def process_once() -> int:
 
     # Creates Telegram's native command-menu button. Failure is non-fatal;
     # command polling must continue even if menu registration is unavailable.
-    _tg(token, "setMyCommands", {"commands": BOT_COMMANDS})
+    if register_commands:
+        _tg(token, "setMyCommands", {"commands": BOT_COMMANDS})
 
     offset = rc.load_cloud_state()["update_offset"]
     data = _tg(token, "getUpdates",

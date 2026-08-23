@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -57,6 +59,88 @@ def scheduled_decision() -> tuple[bool, str, dict, object | None]:
     if not check.in_window:
         return False, "outside_window", cfg, check
     return True, "in_window", cfg, check
+
+
+def session_decision() -> tuple[bool, str, dict, object | None]:
+    """Start a bounded cloud session in-window even while Telegram-paused.
+
+    A paused session stays alive and polls commands, so /resume no longer has to
+    wait for GitHub's next unreliable cron wake-up.
+    """
+    import runtime_config
+    cfg = runtime_config.load()
+    sched = TehranScheduler([(w["name"], w["start"], w["end"])
+                             for w in cfg["working_windows"]])
+    check = sched.check()
+    return (check.in_window, "in_window" if check.in_window else "outside_window",
+            cfg, check)
+
+
+def _session_delays(cfg: dict, rng: random.Random | None = None) -> tuple[float, callable]:
+    """Initial human-like jitter and a fresh random delay for later passes."""
+    rng = rng or random.Random()
+    interval = cfg.get("read_interval_seconds", {})
+    low = max(60, int(interval.get("min", 240)))
+    high = max(low, int(interval.get("max", 720)))
+    return rng.uniform(0, 120), lambda: rng.uniform(low, high)
+
+
+def _polling_wait(seconds: float, deadline: float) -> bool:
+    """Wait in short chunks; return early when a Telegram command arrives."""
+    import telegram_once
+    remaining = min(max(0.0, seconds), max(0.0, deadline - time.monotonic()))
+    while remaining > 0:
+        chunk = min(30.0, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
+        if telegram_once.process_once(register_commands=False):
+            return True
+    return False
+
+
+def run_cloud_session(minutes: float = 50.0) -> dict[str, int]:
+    """Run multiple bounded passes while promptly honoring Telegram controls."""
+    import runtime_config
+    import telegram_once
+
+    deadline = time.monotonic() + max(1.0, minutes * 60.0)
+    cfg = runtime_config.load()
+    initial_delay, next_delay = _session_delays(cfg)
+    totals = {"scouted": 0, "drafts": 0, "replies": 0, "failed": 0, "passes": 0}
+    print(f"cloud_session_minutes={minutes:g} initial_delay_seconds={initial_delay:.0f}")
+    telegram_once.process_once(register_commands=False)
+    _polling_wait(initial_delay, deadline)
+
+    while time.monotonic() < deadline:
+        telegram_once.process_once(register_commands=False)
+        should_run, reason, cfg, check = scheduled_decision()
+        if reason == "outside_window":
+            print("cloud session stopped: outside_window")
+            break
+        if reason == "paused":
+            print("cloud session paused; polling Telegram")
+            _polling_wait(30, deadline)
+            continue
+
+        stats = run_pass(cfg, check.window_name)
+        totals["passes"] += 1
+        for key in ("scouted", "drafts", "replies", "failed"):
+            totals[key] += stats.get(key, 0)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        runtime_config.save_cloud_state(
+            last_run=now,
+            last_successful_run=now,
+            last_scout_count=stats.get("scouted", 0),
+            last_error_summary="",
+        )
+        notify_telegram("growth-no1 scheduled pass complete\n" + "\n".join(
+            f"{key}: {value}" for key, value in stats.items()))
+        delay = next_delay()
+        print(f"next_pass_delay_seconds={delay:.0f}")
+        _polling_wait(delay, deadline)
+    print("cloud_session_complete " + " ".join(
+        f"{key}={value}" for key, value in totals.items()))
+    return totals
 
 
 def notify_telegram(text: str) -> bool:
@@ -205,6 +289,10 @@ def main() -> int:
     ap.add_argument("--loop", action="store_true", help="continuous, window-aware")
     ap.add_argument("--scheduled-check", action="store_true",
                     help="print GitHub output deciding whether browser work is needed")
+    ap.add_argument("--session-check", action="store_true",
+                    help="print GitHub output for a bounded in-window session")
+    ap.add_argument("--session-minutes", type=float,
+                    help="bounded cloud session with Telegram polling")
     args = ap.parse_args()
     cfg = load_settings()
 
@@ -212,6 +300,16 @@ def main() -> int:
         should_run, reason, _cfg, _check = scheduled_decision()
         print(f"should_run={'true' if should_run else 'false'}")
         print(f"reason={reason}")
+        return 0
+
+    if args.session_check:
+        should_run, reason, _cfg, _check = session_decision()
+        print(f"should_run={'true' if should_run else 'false'}")
+        print(f"reason={reason}")
+        return 0
+
+    if args.session_minutes is not None:
+        run_cloud_session(args.session_minutes)
         return 0
 
     if args.once:
