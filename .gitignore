@@ -1,0 +1,9 @@
+cookies.json
+data/cookies.json
+__pycache__/
+*.pyc
+.venv/
+data/*.json
+data/*.jsonl
+playwright-report/
+test-results/

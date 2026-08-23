@@ -1,0 +1,72 @@
+name: Growth Reply Agent
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Fill replies without clicking Send
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-reply-agent
+  cancel-in-progress: false
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
+      X_CT0: ${{ secrets.X_CT0 }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      NOUS_API_KEY: ${{ secrets.NOUS_API_KEY }}
+      REPLY_DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run == true) || (github.event_name == 'schedule' && vars.LIVE_REPLIES != 'true') }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restore reply history
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: growth-state-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            growth-state-${{ runner.os }}-
+
+      - name: Install dependencies and Chromium
+        run: |
+          python -m pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run tests
+        run: python tests/test_scheduler_and_drafts.py
+
+      - name: Run scheduled agent pass
+        if: github.event_name == 'schedule'
+        run: python src/growth_no1/runner.py --scheduled
+
+      - name: Run manual agent pass
+        if: github.event_name == 'workflow_dispatch'
+        run: python src/growth_no1/runner.py --once
+
+      - name: Save reply history
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: growth-state-${{ runner.os }}-${{ github.run_id }}

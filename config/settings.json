@@ -1,0 +1,37 @@
+{
+  "timezone": "Asia/Tehran",
+  "working_windows": [
+    {"name": "morning", "start": "06:00", "end": "12:00", "max_replies": 5},
+    {"name": "evening", "start": "12:30", "end": "01:00", "crosses_midnight": true, "max_replies": 5}
+  ],
+  "read_interval_seconds": {"min": 240, "max": 720},
+  "scout": {
+    "keywords": ["gm", "web3", "crypto", "bitcoin", "eth", "solana", "ai agents"],
+    "max_tweets_per_session": 25,
+    "min_followers_for_authority": 0
+  },
+  "drafts": {
+    "styles": ["gm", "observant", "curious", "dry_humor"],
+    "max_words": 15,
+    "lowercase": true,
+    "no_emoji": true,
+    "batch_size": 10,
+    "skill_prompt": null,
+    "style_override": null
+  },
+  "provider": {
+    "name": "nous",
+    "endpoint": "https://inference-api.nousresearch.com/v1/chat/completions",
+    "model": "ox-alpha",
+    "api_key_env": "NOUS_API_KEY"
+  },
+  "reply": {
+    "enabled": true,
+    "dry_run": true,
+    "headless": true,
+    "max_replies_per_pass": 1,
+    "style": "observant"
+  },
+  "telegram": {"bot_token": null, "chat_id": null},
+  "storage": {"data_dir": "../data"}
+}
