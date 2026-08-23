@@ -36,6 +36,102 @@ class TweetCandidate:
     score: float = 0.0
 
 
+# --------------------------------------------------------------- safety gate
+
+DEFAULT_BLOCKED_TERMS = [
+    # politics / elections
+    "election", "vote", "voting", "ballot", "senate", "congress", "parliament",
+    "president", "prime minister", "democrat", "republican", "leftist",
+    "right-wing", "liberal", "conservative", "campaign", "political",
+    "politics", "union", "unions", "strike", "protest", "riot",
+    # violence / war / hate
+    "war", "genocide", "terror", "terrorist", "attack", "killed", "killing",
+    "shooting", "hostage", "military", "missile", "drone strike", "hate",
+    "racist", "nazi", "slur", "violence", "violent", "weapon", "gun",
+]
+
+
+def evaluate_candidate(
+    text: str,
+    keywords: list[str],
+    min_matches: int = 2,
+    blocked_terms: list[str] | None = None,
+) -> dict:
+    """Strict relevance + safety gate. Blocked term overrides everything;
+    image presence or X-search placement never count toward eligibility."""
+    lower = text.lower()
+
+    def contains_term(term: str) -> bool:
+        # Whole tokens/phrases only: "eth" must not match "together" and
+        # "union" must not match "reunion".
+        pieces = [re.escape(piece) for piece in term.lower().split()]
+        pattern = r"(?<!\w)" + r"\s+".join(pieces) + r"(?!\w)"
+        return bool(re.search(pattern, lower))
+
+    matched = [k for k in keywords if k and contains_term(k)]
+    blocked = [t for t in (blocked_terms or []) if t and contains_term(t)]
+    if blocked:
+        return {"approved": False, "matched_keywords": matched,
+                "blocked_reason": f"sensitive topic(s): {', '.join(sorted(set(blocked)))[:200]}"}
+    if len(matched) < max(1, int(min_matches)):
+        return {"approved": False, "matched_keywords": matched,
+                "blocked_reason": (f"insufficient relevance: {len(matched)} match(es), "
+                                   f"need {min_matches}")}
+    return {"approved": True, "matched_keywords": matched, "blocked_reason": None}
+
+
+def _canonical_permalink(article) -> tuple[str, str] | None:
+    """Canonical /author/status/id permalink of THIS article.
+
+    Prefers the anchor containing the article's own <time> element (X wraps
+    the timestamp in the canonical status link). Falls back to an anchor whose
+    href role is 'link' inside the tweet's text group. Quoted tweets live in
+    nested articles / show-parent links, which are excluded by construction.
+    Returns (href, author) or None."""
+    import re as _re
+    time_el = None
+    try:
+        time_el = article.query_selector("time")
+    except Exception:
+        time_el = None
+    if time_el is not None:
+        try:
+            el = time_el
+            for _ in range(8):  # walk up to the wrapping <a>
+                handle = el.evaluate_handle("e => e.parentElement")
+                el = handle.as_element() if hasattr(handle, "as_element") else None
+                if el is None:
+                    break
+                if el.evaluate("e => e.tagName === 'A'"):
+                    href = el.get_attribute("href") or ""
+                    m = _re.match(r"^/([^/]+)/status/(\d+)", href)
+                    if m:
+                        return href, m.group(1)
+                    break
+        except Exception:
+            pass  # fall through to anchor scan
+    # fallback: only anchors that belong to THIS article. A quoted tweet renders
+    # as its own nested <article>, so any anchor whose closest article differs
+    # from the root belongs to the quote/parent content and must be skipped.
+    try:
+        anchors = article.query_selector_all("a[href*='/status/']")
+    except Exception:
+        return None
+    for a in anchors:
+        try:
+            same_article = a.evaluate(
+                "(e, root) => e.closest('article') === root", article)
+        except Exception:
+            same_article = True
+        if not same_article:
+            continue
+        href = a.get_attribute("href") or ""
+        m = _re.match(r"^/([^/]+)/status/(\d+)$", href)
+        if m:
+            return href, m.group(1)
+    return None
+
+
 class ScoutEngine:
     """Cookie-authenticated, read-only tweet scout.
 
@@ -91,27 +187,32 @@ class ScoutEngine:
             ctx.add_cookies(self.cookies)  # already Playwright-shaped
             page = ctx.new_page()
             page.goto(self.SEARCH_URL.format(query=query), wait_until="domcontentloaded")
-            page.wait_for_timeout(4000)
+            page.wait_for_selector("article[data-testid='tweet']", timeout=15000)
+            page.wait_for_timeout(2000)
             articles = page.query_selector_all("article[data-testid='tweet']")
             seen: set[str] = set()
             for art in articles[:limit]:
                 try:
+                    # All fields must come from the SAME article element.
                     text_el = art.query_selector("div[data-testid='tweetText']")
                     text = text_el.inner_text() if text_el else ""
-                    link = art.query_selector("a[href*='/status/']")
-                    href = link.get_attribute("href") if link else ""
-                    author = ""
-                    m = re.match(r"/([^/]+)/status/", href or "")
-                    if m:
-                        author = m.group(1)
-                    imgs = art.query_selector_all("img[src*='pbs.twimg.com/media']")
-                    tid = (href or "").rstrip("/").rsplit("/", 1)[-1]
-                    if not tid or tid in seen:
+                    canon = _canonical_permalink(art)
+                    if not canon:
+                        continue  # no trustworthy permalink -> reject
+                    href, author = canon
+                    tid = href.rstrip("/").rsplit("/", 1)[-1]
+                    # consistency: the article's own text must belong to this id's
+                    # conversation; quoted content lives in a nested article
+                    nested = art.query_selector("article[data-testid='tweet'] article[data-testid='tweet']")
+                    if nested is not None and not re.match(rf"^/{re.escape(author)}/status/", href or ""):
+                        continue
+                    if not tid or not author or tid in seen:
                         continue
                     seen.add(tid)
+                    imgs = art.query_selector_all("img[src*='pbs.twimg.com/media']")
                     candidates.append(TweetCandidate(
                         id=tid, author=author, text=text.strip(),
-                        url=f"{base_url}/{author}/status/{tid}",
+                        url=f"{base_url}{href}",
                         has_image=bool(imgs),
                         image_urls=[i.get_attribute("src") for i in imgs] or [],
                     ))

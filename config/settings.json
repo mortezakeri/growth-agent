@@ -8,7 +8,9 @@
   "scout": {
     "keywords": ["gm", "web3", "crypto", "bitcoin", "eth", "solana", "ai agents"],
     "max_tweets_per_session": 25,
-    "min_followers_for_authority": 0
+    "min_followers_for_authority": 0,
+    "min_keyword_matches": 1,
+    "blocked_terms": null
   },
   "drafts": {
     "styles": ["gm", "observant", "curious", "dry_humor"],

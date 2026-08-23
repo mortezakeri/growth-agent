@@ -77,8 +77,11 @@ class ReplyAgent:
         return d
 
     def _write_report(self, d: Path, tweet_url: str, **flags) -> dict:
+        candidate_text = flags.get("candidate_tweet_text") or ""
         report = {
             "tweet_url": tweet_url,
+            "canonical_tweet_id": flags.get("canonical_tweet_id"),
+            "canonical_tweet_url": flags.get("canonical_tweet_url"),
             "login_detected": flags.get("login_detected", False),
             "tweet_loaded": flags.get("tweet_loaded", False),
             "textarea_found": flags.get("textarea_found", False),
@@ -86,6 +89,11 @@ class ReplyAgent:
             "send_button_found": flags.get("send_button_found", False),
             "send_button_enabled": flags.get("send_button_enabled", None),
             "send_clicked": False,  # invariant: dry run never clicks
+            "candidate_tweet_text": candidate_text[:280],  # privacy: capped
+            "matched_keywords": flags.get("matched_keywords", []),
+            "relevance_approved": flags.get("relevance_approved", None),
+            "blocked_reason": flags.get("blocked_reason"),
+            "draft_source": flags.get("draft_source"),
             "error": (_sanitize_error(flags["error"],
                                       (c.get("value") for c in self.cookies))
                       if flags.get("error") else None),
@@ -95,7 +103,8 @@ class ReplyAgent:
         (d / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         return report
 
-    def reply(self, tweet_url: str, text: str) -> ReplyResult:
+    def reply(self, tweet_url: str, text: str,
+              report_extra: dict | None = None) -> ReplyResult:
         if not text.strip():
             return ReplyResult(False, "failed", "empty reply")
 
@@ -106,7 +115,7 @@ class ReplyAgent:
         except Exception as exc:
             return ReplyResult(False, "failed", _sanitize_error(
                 exc, (c.get("value") for c in self.cookies)))
-        report_kwargs: dict = {}
+        report_kwargs: dict = dict(report_extra or {})
 
         def finish(ok: bool, status: str, error: Exception | None = None) -> ReplyResult:
             report = None
@@ -132,13 +141,38 @@ class ReplyAgent:
             try:
                 page.goto(tweet_url, wait_until="domcontentloaded",
                           timeout=self.timeout_ms)
-                report_kwargs["login_detected"] = page.query_selector(
-                    "a[data-testid='SideNav_AccountSwitcher_Button']") is not None
-                article_ok = page.query_selector("article[data-testid='tweet']") is not None
-                report_kwargs["tweet_loaded"] = article_ok
-                if evidence:
+
+                # Bounded waits — flags are only set true AFTER the selector
+                # actually appears (fixes false false-negatives on slow loads).
+                LOGIN_SEL = "[data-testid='SideNav_AccountSwitcher_Button']"
+                ARTICLE_SEL = "article[data-testid='tweet']"
+                try:
+                    page.wait_for_selector(LOGIN_SEL, state="attached",
+                                           timeout=10_000)
+                    report_kwargs["login_detected"] = True
+                except Exception:
+                    report_kwargs["login_detected"] = False
+                try:
+                    page.wait_for_selector(ARTICLE_SEL, state="visible",
+                                           timeout=15_000)
+                    report_kwargs["tweet_loaded"] = True
+                except Exception:
+                    report_kwargs["tweet_loaded"] = False
+
+                if evidence and report_kwargs.get("tweet_loaded"):
+                    # Screenshot 01 only after the article is visible,
+                    # never during the loading screen.
                     page.screenshot(path=str(evidence / "01-tweet-loaded.png"),
                                     full_page=False)
+
+                # Gate: do not touch the composer unless the tweet is real
+                # and we're logged in.
+                if not report_kwargs.get("tweet_loaded"):
+                    return finish(False, "failed", RuntimeError(
+                        "target tweet did not load; reply aborted"))
+                if not report_kwargs.get("login_detected"):
+                    return finish(False, "failed", RuntimeError(
+                        "login could not be verified; reply aborted"))
 
                 textarea = page.locator(self.TEXTAREA).first
                 textarea.wait_for(state="visible", timeout=self.timeout_ms)

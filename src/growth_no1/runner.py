@@ -18,6 +18,7 @@ from reply_agent import ReplyAgent  # noqa: E402
 from shift_quota import increment as increment_quota, used as quota_used  # noqa: E402
 import nous_client  # noqa: E402
 import cookies as cookie_store  # noqa: E402
+from scout import evaluate_candidate, DEFAULT_BLOCKED_TERMS  # noqa: E402
 
 
 def load_settings() -> dict:
@@ -36,6 +37,11 @@ def load_cookies() -> list[dict]:
 def _env_bool(name: str, default: bool) -> bool:
     value = os.environ.get(name)
     return default if value is None else value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def delivery_allowed(draft_source: str, dry_run: bool) -> bool:
+    """Local templates may exercise dry-run UI but can never be sent live."""
+    return dry_run or draft_source == "llm"
 
 
 def notify_telegram(text: str) -> bool:
@@ -109,19 +115,45 @@ def run_pass(cfg: dict, window_name: str | None = None) -> dict[str, int]:
         remaining = max(0, int(window.get("max_replies", max_replies)) - quota_used(window_name))
         max_replies = min(max_replies, remaining)
     preferred_style = reply_cfg.get("style", "observant")
+    min_matches = int(cfg["scout"].get("min_keyword_matches", 1))
+    configured_blocked_terms = cfg["scout"].get("blocked_terms")
+    blocked_terms = (DEFAULT_BLOCKED_TERMS if configured_blocked_terms is None
+                     else configured_blocked_terms)
+    skip_log = []
     for t in tweets[: cfg["drafts"]["batch_size"]]:
-        engine.keyword_score(t)
-        if t.score < 2.0:
+        gate = evaluate_candidate(t.text, cfg["scout"]["keywords"],
+                                  min_matches=min_matches,
+                                  blocked_terms=blocked_terms)
+        if not gate["approved"]:
+            skip_log.append({"id": t.id, "reason": gate["blocked_reason"]})
             continue
         if use_llm:
             bodies = nous_client.generate_drafts(t.author, t.text, gen.styles)
             drafts = gen.from_bodies(t.id, bodies)
+            draft_source = "llm"
         else:
             drafts = gen.generate(t.id, t.author or "friend", topic="web3")
+            draft_source = "local_fallback"
         added += queue.add(drafts)
         if replier and reply_attempts < max_replies and not queue.was_posted(t.id):
             chosen = next((d for d in drafts if d.style == preferred_style), drafts[0])
-            result = replier.reply(t.url, chosen.body)
+            # This gate MUST precede ReplyAgent.reply(): in live mode that
+            # method clicks Send before returning status="posted".
+            if not delivery_allowed(draft_source, replier.dry_run):
+                failed += 1
+                print(f"BLOCKED live delivery from {draft_source} draft; tweet {t.id}")
+                continue
+            result = replier.reply(
+                t.url, chosen.body,
+                report_extra={
+                    "candidate_tweet_text": t.text[:280],
+                    "matched_keywords": gate["matched_keywords"],
+                    "relevance_approved": True,
+                    "blocked_reason": None,
+                    "draft_source": draft_source,
+                    "canonical_tweet_id": t.id,
+                    "canonical_tweet_url": t.url,
+                })
             reply_attempts += 1
             queue.record_delivery(chosen.id, result.status, result.error)
             if result.status == "posted":
@@ -132,6 +164,10 @@ def run_pass(cfg: dict, window_name: str | None = None) -> dict[str, int]:
             elif result.status == "failed":
                 failed += 1
                 notify_telegram(f"reply failed\n{t.url}\n\n{result.error or 'unknown error'}")
+    if skip_log:
+        (ROOT / "data" / "skip_log.json").write_text(
+            json.dumps(skip_log, indent=2)[:100_000], encoding="utf-8")
+        print(f"skipped_candidates={len(skip_log)} (see data/skip_log.json)")
     print(f"scouted={len(tweets)} analyzed={len(analyses)} "
           f"new_drafts={added} replies={sent}")
     return {"scouted": len(tweets), "drafts": added, "replies": sent, "failed": failed}

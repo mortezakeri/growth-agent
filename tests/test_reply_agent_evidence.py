@@ -37,6 +37,9 @@ class FakePage:
     def locator(self, sel): return FakeLocator(self)
     def screenshot(self, path=None, full_page=False): self.screenshots.append(path); return Path(path).write_bytes(b"\x89PNG fake")
     def goto(self, *a, **k): pass
+    def wait_for_selector(self, sel, **k):
+        # simulate a fully loaded, logged-in page (login + article present)
+        return None
 
 
 class FakeCtx:
