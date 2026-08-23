@@ -108,13 +108,13 @@ def test_provider_fallback_no_key(monkeypatch_dict=None):
 
 def test_creative_reply_prompt_and_hard_word_cap():
     prompt = nous_client.DRAFT_SYSTEM.lower()
-    for phrase in ("ai art", "filmmaking", "maximum 15 words",
-                   "directly reference", "empty compliment", "never use emojis"):
+    for phrase in ("crypto twitter", "original tweet", "maximum 16 words",
+                   "output exactly: skip", "generic praise", "wordplay"):
         assert phrase in prompt
     raw = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen 🎨"
     cleaned = nous_client._clean_reply(raw)
-    assert len(cleaned.split()) == 15
-    assert "sixteen" not in cleaned and "🎨" not in cleaned
+    assert len(cleaned.split()) == 16
+    assert "sixteen" in cleaned and "🎨" not in cleaned
 
 
 def test_draft_source_tracks_llm_vs_fallback():
@@ -124,8 +124,21 @@ def test_draft_source_tracks_llm_vs_fallback():
         bodies, sources = nous_client.generate_drafts_with_sources(
             "artist", "praying I make it in crypto", ("observant", "curious"))
         assert sources["observant"] == "llm"
-        assert sources["curious"] == "local_fallback"
+        assert sources["curious"] == "llm"
         assert bodies["observant"] == "this crypto prayer carries real conviction"
+        assert bodies["curious"] == bodies["observant"]
+    finally:
+        nous_client.chat = original
+
+
+def test_skip_is_preserved_as_a_delivery_signal():
+    original = nous_client.chat
+    try:
+        nous_client.chat = lambda *_args, **_kwargs: "SKIP"
+        bodies, sources = nous_client.generate_drafts_with_sources(
+            "someone", "unrelated post", ("observant",))
+        assert bodies["observant"] == "SKIP"
+        assert sources["observant"] == "llm_skip"
     finally:
         nous_client.chat = original
 

@@ -126,3 +126,7 @@ class ApprovalQueue:
 
     def pending(self) -> list[dict]:
         return [r for r in self._read() if r["status"] == "pending"]
+
+    def recent_bodies(self, limit: int = 12) -> list[str]:
+        """Recent generated replies used only to reduce repetitive phrasing."""
+        return [r.get("body", "") for r in self._read() if r.get("body")][-limit:]

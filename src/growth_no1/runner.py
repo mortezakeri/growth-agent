@@ -144,15 +144,19 @@ def run_pass(cfg: dict, window_name: str | None = None) -> dict[str, int]:
             continue
         if use_llm:
             bodies, draft_sources = nous_client.generate_drafts_with_sources(
-                t.author, t.text, gen.styles)
+                t.author, t.text, gen.styles,
+                recent_replies=queue.recent_bodies())
             drafts = gen.from_bodies(t.id, bodies)
         else:
             drafts = gen.generate(t.id, t.author or "friend", topic="web3")
             draft_sources = {d.style: "local_fallback" for d in drafts}
-        added += queue.add(drafts)
         if replier and reply_attempts < max_replies and not queue.was_posted(t.id):
             chosen = next((d for d in drafts if d.style == preferred_style), drafts[0])
             draft_source = draft_sources.get(chosen.style, "local_fallback")
+            if chosen.body.strip().upper() == "SKIP" or draft_source == "llm_skip":
+                skip_log.append({"id": t.id, "reason": "reply model returned SKIP"})
+                continue
+            added += queue.add(drafts)
             # This gate MUST precede ReplyAgent.reply(): in live mode that
             # method clicks Send before returning status="posted".
             if not delivery_allowed(draft_source, replier.dry_run):
@@ -180,6 +184,8 @@ def run_pass(cfg: dict, window_name: str | None = None) -> dict[str, int]:
             elif result.status == "failed":
                 failed += 1
                 notify_telegram(f"reply failed\n{t.url}\n\n{result.error or 'unknown error'}")
+        else:
+            added += queue.add(drafts)
     if skip_log:
         (ROOT / "data" / "skip_log.json").write_text(
             json.dumps(skip_log, indent=2)[:100_000], encoding="utf-8")

@@ -107,19 +107,45 @@ def vision_llm_call(prompt: str, b64_png: str) -> str:
     return vision_prompt(prompt, image)
 
 
-DRAFT_SYSTEM = """Write one-of-a-kind English replies for X.
-Account niche: AI art, filmmaking, creativity, and Web3.
-Voice: creative, free, positive, authentic, slightly artistic, friendly peer-to-peer.
+DRAFT_SYSTEM = """You are an elite Crypto Twitter / Web3 reply agent.
+
+Read the ORIGINAL tweet supplied by the user and write ONE short, natural reply
+to that ORIGINAL tweet. Never reply to replies, comments, quoted tweets, or
+nested conversations.
+
 Hard rules:
-- Maximum 15 words. Count words before answering.
-- Directly reference the original tweet; never use an empty compliment.
-- Never answer only GM, Good morning, Have a great day, or similar filler.
-- For a GM post, mention a concrete detail from the tweet and go beyond GM.
-- For art, AI, or film, offer a genuine creative observation or insight.
-- Avoid spam, copy-paste phrasing, hype, and excessive flattery.
-- Never use emojis.
-- Output only the requested labeled replies, with no explanation.
-Formula: short content-specific reference + one valuable or energetic thought."""
+- Maximum 16 words. Count words before answering.
+- Use lowercase by default.
+- Output only the reply text: no explanation, analysis, alternatives, prefix,
+  quotation marks, or hashtags.
+- Never sound like an AI, bot, marketer, or engagement farmer.
+- If the tweet does not deserve a natural reply, output exactly: SKIP
+
+Voice: casual, sharp, witty, slightly playful, internet-native, confident but
+not try-hard, sometimes understated, and natural enough to look manually typed.
+Avoid generic praise, corporate language, motivational cliches, fake enthusiasm,
+repetitive structures, obvious engagement bait, excessive emojis, and phrases
+such as "great insight", "well said", "this is huge", or "couldn't agree more".
+
+First classify the tweet internally as: morning/greeting, crypto/Web3 opinion,
+AI/agents/technology, product announcement, news/market update, meme/joke,
+personal building progress, question, educational/technical, or other. Do not
+output the classification. For technical, opinion, news, product, AI, and
+educational tweets, prioritize a contextual response over a greeting. For an
+obvious morning/weekend tweet, a creative CT-native greeting is appropriate.
+
+For morning posts, rotate language and structure. Do not repeatedly open with
+gm, morning, anon, ser, rise, another day, building, or cooking. Draw naturally
+from CT concepts such as shipping, blocks, onchain life, charts, coffee,
+liquidity, builders, trenches, and the market, but never use them mechanically.
+Sometimes skip the greeting and use a clever observation, short joke, wordplay,
+reaction, or tiny continuation of the original thought.
+
+Look for wordplay in the original tweet. Match jokes instead of forcing a
+serious response. Before answering, silently verify that the reply is human,
+relevant to the original tweet, adds something small, is at most 16 words,
+does not repeat a recent structure supplied by the user, and does not feel
+forced. Rewrite if needed; otherwise output SKIP."""
 
 STYLE_INSTRUCTIONS = {
     "witty": "Be witty and playful; light wordplay is welcome.",
@@ -144,7 +170,7 @@ def _system_prompt() -> str:
     return "\n".join(parts)
 
 
-def _clean_reply(text: str, max_words: int = 15) -> str:
+def _clean_reply(text: str, max_words: int = 16) -> str:
     """Normalize output; enforce no emoji and the word cap in code."""
     cleaned = re.sub(
         "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\u200d\ufe0f]",
@@ -155,32 +181,36 @@ def _clean_reply(text: str, max_words: int = 15) -> str:
 
 
 def generate_drafts_with_sources(author: str, tweet_text: str,
-                                 styles: tuple[str, ...]) -> tuple[dict[str, str], dict[str, str]]:
+                                 styles: tuple[str, ...],
+                                 recent_replies: list[str] | None = None) -> tuple[dict[str, str], dict[str, str]]:
     """Return draft bodies plus an accurate llm/local_fallback source per style."""
     from drafts import _TEMPLATES  # local templates as fallback
     import random
     rng = random.Random()
 
+    recent = "\n".join(f"- {r}" for r in (recent_replies or [])[-12:])
     prompt = (
-        f"Tweet by @{author}: \"{tweet_text}\"\n\n"
-        f"Write {len(styles)} short replies, one per line, labeled:\n"
-        + "\n".join(f"{s}: <reply>" for s in styles)
-        + "\nEach reply must follow the system rules."
+        f"ORIGINAL TWEET by @{author}:\n{tweet_text}\n\n"
+        + (f"RECENT REPLIES — avoid their openings and structures:\n{recent}\n\n" if recent else "")
+        + "Return only one reply, or SKIP."
     )
     out: dict[str, str] = {}
     sources: dict[str, str] = {}
     try:
-        raw = chat(prompt, system=_system_prompt())
-        for line in raw.splitlines():
-            if ":" not in line:
-                continue
-            style, _, body = line.partition(":")
-            style = style.strip().lower().replace(" ", "_").replace("-", "_")
-            if style in styles and body.strip():
-                cleaned = _clean_reply(body)
-                if cleaned:
-                    out[style] = cleaned
-                    sources[style] = "llm"
+        raw = chat(prompt, system=_system_prompt()).strip()
+        # Accept the old single labeled form during rollout, but the new prompt
+        # asks the provider for one unlabelled answer.
+        if len(raw.splitlines()) == 1 and ":" in raw:
+            maybe_style, _, maybe_body = raw.partition(":")
+            if maybe_style.strip().lower().replace("-", "_") in styles:
+                raw = maybe_body
+        cleaned = _clean_reply(raw, max_words=16)
+        if cleaned.upper() == "SKIP":
+            for style in styles:
+                out[style], sources[style] = "SKIP", "llm_skip"
+        elif cleaned:
+            for style in styles:
+                out[style], sources[style] = cleaned, "llm"
     except Exception as e:
         print(f"[nous] draft generation failed ({e}); using templates")
     for s in styles:
