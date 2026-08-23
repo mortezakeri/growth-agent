@@ -36,7 +36,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: data
-          key: growth-state-${{ runner.os }}-${{ github.run_id }}
+          key: growth-state-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             growth-state-${{ runner.os }}-
 
@@ -83,7 +83,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: data
-          key: growth-state-${{ runner.os }}-${{ github.run_id }}
+          key: growth-state-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload dry-run evidence (screenshots + sanitized reports)
         if: always()
