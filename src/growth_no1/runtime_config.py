@@ -35,10 +35,10 @@ _DEFAULTS = {
         "style_override": None, # witty | analytical | supportive | custom
     },
     "provider": {
-        "name": "nous",
-        "endpoint": "https://inference-api.nousresearch.com/v1/chat/completions",
-        "model": "ox-alpha",
-        "api_key_env": "NOUS_API_KEY",
+        "name": "gemini",
+        "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "model": "gemini-3.6-flash",
+        "api_key_env": "GEMINI_API_KEY",
     },
     "telegram": {"bot_token": None, "chat_id": None},
 }

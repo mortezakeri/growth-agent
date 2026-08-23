@@ -97,6 +97,7 @@ def test_authorized_vs_unauthorized():
         n = tgo.process_once()
         assert n == 1
         assert ctx.sent and ctx.sent[0][0] == "111" and "cloud" in ctx.sent[0][1]
+        assert any(method == "setMyCommands" for method, _ in ctx.tg_calls)
 
 
 def test_dedup_and_offset_persistence():

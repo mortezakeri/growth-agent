@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import urllib.request
 
 NOUS_BASE_URL = "https://inference-api.nousresearch.com/v1/chat/completions"
@@ -69,7 +70,6 @@ def chat(prompt: str, system: str = "You are a concise social media assistant.")
             {"role": "user", "content": prompt},
         ],
         "max_tokens": 300,
-        "temperature": 0.9,
     })
     return resp["choices"][0]["message"]["content"].strip()
 
@@ -98,10 +98,19 @@ def vision_llm_call(prompt: str, b64_png: str) -> str:
     return vision_prompt(prompt, image)
 
 
-DRAFT_SYSTEM = (
-    "Write reply drafts for X (Twitter). Rules: all lowercase, no emoji, "
-    "no punctuation at end, max 15 words, English only. Web3-native tone."
-)
+DRAFT_SYSTEM = """Write one-of-a-kind English replies for X.
+Account niche: AI art, filmmaking, creativity, and Web3.
+Voice: creative, free, positive, authentic, slightly artistic, friendly peer-to-peer.
+Hard rules:
+- Maximum 15 words. Count words before answering.
+- Directly reference the original tweet; never use an empty compliment.
+- Never answer only GM, Good morning, Have a great day, or similar filler.
+- For a GM post, mention a concrete detail from the tweet and go beyond GM.
+- For art, AI, or film, offer a genuine creative observation or insight.
+- Avoid spam, copy-paste phrasing, hype, and excessive flattery.
+- Never use emojis.
+- Output only the requested labeled replies, with no explanation.
+Formula: short content-specific reference + one valuable or energetic thought."""
 
 STYLE_INSTRUCTIONS = {
     "witty": "Be witty and playful; light wordplay is welcome.",
@@ -126,6 +135,16 @@ def _system_prompt() -> str:
     return "\n".join(parts)
 
 
+def _clean_reply(text: str, max_words: int = 15) -> str:
+    """Normalize output; enforce no emoji and the word cap in code."""
+    cleaned = re.sub(
+        "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF\u200d\ufe0f]",
+        "", text,
+    )
+    cleaned = " ".join(cleaned.strip().strip('"').split())
+    return " ".join(cleaned.split()[:max_words]).strip()
+
+
 def generate_drafts(author: str, tweet_text: str, styles: tuple[str, ...]) -> dict[str, str]:
     """LLM-powered drafts; returns {style: body}. Falls back per-style on errors."""
     from drafts import _TEMPLATES  # local templates as fallback
@@ -147,7 +166,9 @@ def generate_drafts(author: str, tweet_text: str, styles: tuple[str, ...]) -> di
             style, _, body = line.partition(":")
             style = style.strip().lower().replace(" ", "_").replace("-", "_")
             if style in styles and body.strip():
-                out[style] = body.strip()[:120]
+                cleaned = _clean_reply(body)
+                if cleaned:
+                    out[style] = cleaned
     except Exception as e:
         print(f"[nous] draft generation failed ({e}); using templates")
     for s in styles:

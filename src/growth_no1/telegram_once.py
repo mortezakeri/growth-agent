@@ -35,6 +35,20 @@ USAGE = (
     "/help"
 )
 
+BOT_COMMANDS = [
+    {"command": "status", "description": "Agent status and active window"},
+    {"command": "stats", "description": "Latest run statistics"},
+    {"command": "pause", "description": "Pause scheduled agent runs"},
+    {"command": "resume", "description": "Resume scheduled agent runs"},
+    {"command": "set_limit", "description": "Set morning/evening reply cap"},
+    {"command": "set_window", "description": "Set a Tehran working window"},
+    {"command": "set_skill", "description": "Set or clear reply instructions"},
+    {"command": "set_style", "description": "Choose the reply style"},
+    {"command": "get_skill", "description": "Show active reply instructions"},
+    {"command": "current_api", "description": "Show active AI provider"},
+    {"command": "help", "description": "Show command help"},
+]
+
 
 def _tg(token: str, method: str, payload: dict) -> dict | None:
     """One Telegram call; errors are reported without exposing the token."""
@@ -204,6 +218,10 @@ def process_once() -> int:
     if not token or not chat_id:
         print("telegram not configured; skipping command processing")
         return 0
+
+    # Creates Telegram's native command-menu button. Failure is non-fatal;
+    # command polling must continue even if menu registration is unavailable.
+    _tg(token, "setMyCommands", {"commands": BOT_COMMANDS})
 
     offset = rc.load_cloud_state()["update_offset"]
     data = _tg(token, "getUpdates",

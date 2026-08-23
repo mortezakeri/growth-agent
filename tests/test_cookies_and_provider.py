@@ -106,6 +106,17 @@ def test_provider_fallback_no_key(monkeypatch_dict=None):
         os.environ.update(saved)
 
 
+def test_creative_reply_prompt_and_hard_word_cap():
+    prompt = nous_client.DRAFT_SYSTEM.lower()
+    for phrase in ("ai art", "filmmaking", "maximum 15 words",
+                   "directly reference", "empty compliment", "never use emojis"):
+        assert phrase in prompt
+    raw = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen 🎨"
+    cleaned = nous_client._clean_reply(raw)
+    assert len(cleaned.split()) == 15
+    assert "sixteen" not in cleaned and "🎨" not in cleaned
+
+
 def test_masking_and_secrets_persistence(tmp_path=None):
     assert rc.mask_key("") == "(not set)"
     assert rc.mask_key("short") == "(set)"
