@@ -29,9 +29,9 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      # Scheduled/push runs are always dry-run. Only an explicit manual opt-in
-      # can enable the already-configured one-reply-per-pass live path.
-      REPLY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.live_reply && 'false' || 'true' }}
+      # Cron and ordinary pushes stay dry-run. Live mode requires either the
+      # manual opt-in or this exact one-shot commit message.
+      REPLY_DRY_RUN: ${{ ((github.event_name == 'workflow_dispatch' && inputs.live_reply) || (github.event_name == 'push' && github.event.head_commit.message == 'Run exactly one live reply test')) && 'false' || 'true' }}
 
     steps:
       - name: Check out repository
