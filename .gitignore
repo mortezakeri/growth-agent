@@ -6,5 +6,6 @@ __pycache__/
 .venv/
 data/*.json
 data/*.jsonl
+artifacts/
 playwright-report/
 test-results/

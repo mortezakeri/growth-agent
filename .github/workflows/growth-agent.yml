@@ -68,3 +68,12 @@ jobs:
         with:
           path: data
           key: growth-state-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Upload dry-run evidence (screenshots + sanitized reports)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-dry-run-evidence
+          path: artifacts/playwright/
+          retention-days: 3
+          if-no-files-found: ignore
