@@ -1,82 +1,77 @@
 # growth-no1
 
-Standalone Web3/GM reply agent for X. It scouts, scores, drafts, and can deliver
-replies through Playwright. Delivery starts in dry-run mode.
+عامل رشد X با Playwright که روی GitHub Actions اجرا می‌شود و از تلگرام کنترل
+می‌شود. اجرای فعلی همیشه **dry-run** است: صفحه و متن پاسخ را آماده می‌کند، اما
+روی دکمه Reply کلیک نمی‌کند. بنابراین تا زمان اضافه‌شدن Gemini هیچ پاسخ زنده‌ای
+ارسال نمی‌شود.
 
-## Layout
+## اجرای ابری بدون VPS
 
-```
-src/growth_no1/
-  scheduler.py   Tehran-timezone working windows + 4-12min polite interval clock
-  scout.py       Cookie-auth Playwright reader and scorer
-  reply_agent.py Cookie-auth Playwright reply delivery
-  vision.py      Multimodal image analysis hook (provider-injectable)
-  drafts.py      Draft generator (4 styles) + JSONL approval queue
-  runner.py      --once / --loop entry point
-config/settings.json   windows, intervals, keywords, draft rules
-data/                  candidates.json, drafts.jsonl, cookies.json (gitignored!)
-```
+فایل `.github/workflows/growth-agent.yml` هر ۱۰ دقیقه بیدار می‌شود. ابتدا
+فرمان‌های معوق تلگرام را یک‌بار می‌خواند، سپس فقط اگر عامل pause نباشد و ساعت
+داخل یکی از پنجره‌های تهران باشد Chromium را نصب و پاس Playwright را اجرا
+می‌کند. خاموش‌بودن کامپیوتر شخصی اثری روی آن ندارد.
 
-## Working windows (Asia/Tehran)
+GitHub زمان اجرای cron را دقیق تضمین نمی‌کند؛ فرمان تلگرام معمولاً در اجرای بعدی
+و با چند دقیقه تأخیر اعمال می‌شود. هم‌زمان polling محلی بات را اجرا نکنید، چون
+با `getUpdates` ابری تداخل ایجاد می‌کند.
 
-| shift | window |
-|---|---|
-| morning | 06:00 – 12:00 |
-| afternoon/night | 12:30 – 01:00 (+1) |
-| silent | everything else |
+## Secrets لازم در GitHub
 
-## Usage
+در مسیر **Settings → Secrets and variables → Actions** این سه Repository Secret
+را بسازید:
 
-```bash
-cd src/growth_no1
-python runner.py --once          # one scout pass now (no window check)
-python runner.py --loop          # continuous, window-aware, 4-12 min jitter
-```
+- `X_COOKIES_JSON`: کل JSON خروجی Cookie Editor V3
+- `TELEGRAM_BOT_TOKEN`: توکن BotFather
+- `TELEGRAM_CHAT_ID`: شناسه عددی چت مجاز
 
-Cookies go in `data/cookies.json` (`auth_token`, `ct0`) — never committed.
-Approve drafts by editing `data/drafts.jsonl` status fields or via
-`ApprovalQueue.batch_approve([...])` in Python.
+مقادیر secret هیچ‌وقت در `settings.json` یا state ابری ذخیره نمی‌شوند. برای
+Gemini بعداً secret مناسب provider اضافه می‌شود؛ فعلاً نبودن کلید API مجاز است.
 
-## Reply mode
+## فرمان‌های تلگرام در حالت GitHub Actions
 
-`config/settings.json` enables the reply pipeline with `dry_run: true`. In this
-mode Playwright opens the tweet and fills the reply, but does not click Send.
-After verifying login and selectors, set `dry_run` to `false`. The runner posts
-at most `max_replies_per_pass`, records `posted/failed/dry_run`, and never posts
-twice to a tweet already recorded as posted. Credentials stay out of Git/logs.
-
-## GitHub Actions
-
-The workflow at `.github/workflows/growth-agent.yml` runs every 10 minutes and
-executes only during the configured Tehran windows. Add these repository
-secrets under **Settings → Secrets and variables → Actions**:
-
-- `X_AUTH_TOKEN`
-- `X_CT0`
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
-- `NOUS_API_KEY` (optional; local templates are used without it)
-
-Scheduled runs are dry-run by default. After one successful manual dry-run,
-create the repository variable `LIVE_REPLIES=true` to let scheduled runs click
-Send. Manual workflow runs always expose their own `dry_run` checkbox. Reply
-history is carried between Actions runs using a private Actions cache.
-
-## Live Telegram control
-
-Run `python src/growth_no1/runner.py --loop` for the persistent process. It
-starts the authenticated Telegram controller beside the runner and reloads
-`config/settings.json` every cycle. Available commands:
-
-- `/set_limit morning|evening NUMBER`
-- `/set_window morning|evening HH:MM HH:MM`
-- `/set_skill PROMPT`, `/set_style witty|analytical|supportive|custom [PROMPT]`
+- `/status` و `/stats`
+- `/pause` و `/resume`
+- `/set_limit morning 3`
+- `/set_limit evening 5`
+- `/set_window morning 06:00 12:00`
+- `/set_window evening 12:30 01:00`
+- `/set_skill متن دستور رفتاری` یا `/set_skill clear`
+- `/set_style witty|analytical|supportive`
+- `/set_style custom متن سبک دلخواه`
 - `/get_skill`
-- `/set_api PROVIDER API_KEY [ENDPOINT]`, `/current_api`
-- `/status`, `/stats`, `/pause`, `/resume`
+- `/current_api`
+- `/help`
 
-Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the process environment.
-Only that chat ID is accepted. `/set_api` deletes the command message when
-possible and all API displays are masked. Because the requested API key is
-persisted in `config/settings.json`, never commit that file after setting a
-live key; use GitHub Actions Secrets for hosted runs.
+فرمان `/set_api` در حالت ابری کلید را ذخیره نمی‌کند و پیام حاوی کلید را، اگر
+تلگرام اجازه دهد، حذف می‌کند. کلید provider باید فقط در GitHub Repository
+Secrets قرار گیرد.
+
+تغییرات امن در `data/cloud_runtime.json` نوشته و با Actions cache بین اجراها
+حفظ می‌شوند؛ `config/settings.json` داخل checkout دست‌نخورده می‌ماند.
+
+## تست و اجرای دستی
+
+از تب Actions، workflow با نام **Growth Reply Agent** را با **Run workflow**
+اجرا کنید. اجرای دستی هم dry-run اجباری است. در پایان، artifact با نام
+`playwright-dry-run-evidence` شامل تصاویر و `report.json` پاک‌سازی‌شده است و سه
+روز نگهداری می‌شود.
+
+اجرای تست‌ها در ویندوز:
+
+```powershell
+python tests/test_scheduler_and_drafts.py
+python tests/test_cookies_and_provider.py
+python tests/test_reply_agent_evidence.py
+python tests/test_safety_gates.py
+python tests/test_telegram_cloud.py
+python tests/test_runtime_config_security.py
+```
+
+اجرای محلی یک پاس dry-run:
+
+```powershell
+python src/growth_no1/runner.py --once
+```
+
+فایل‌های `data/`، شواهد Playwright و `config/secrets.json` نباید commit شوند.

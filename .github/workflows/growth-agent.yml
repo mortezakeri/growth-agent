@@ -4,12 +4,6 @@ on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Fill replies without clicking Send
-        required: true
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -26,36 +20,58 @@ jobs:
       X_COOKIES_JSON: ${{ secrets.X_COOKIES_JSON }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      REPLY_DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run == true) || (github.event_name == 'schedule' && vars.LIVE_REPLIES != 'true') }}
+      REPLY_DRY_RUN: true
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Restore reply history
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: data
           key: growth-state-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             growth-state-${{ runner.os }}-
 
-      - name: Install dependencies and Chromium
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Process Telegram commands (one-shot)
+        run: python src/growth_no1/telegram_once.py
+
+      - name: Decide whether browser work is needed
+        id: gate
+        shell: bash
         run: |
-          python -m pip install -r requirements.txt
-          python -m playwright install --with-deps chromium
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "reason=manual" >> "$GITHUB_OUTPUT"
+          else
+            python src/growth_no1/runner.py --scheduled-check >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Chromium
+        if: steps.gate.outputs.should_run == 'true'
+        run: python -m playwright install --with-deps chromium
 
       - name: Run tests
-        run: python tests/test_scheduler_and_drafts.py
+        run: |
+          python tests/test_scheduler_and_drafts.py
+          python tests/test_cookies_and_provider.py
+          python tests/test_reply_agent_evidence.py
+          python tests/test_safety_gates.py
+          python tests/test_telegram_cloud.py
+          python tests/test_runtime_config_security.py
 
       - name: Run scheduled agent pass
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && steps.gate.outputs.should_run == 'true'
         run: python src/growth_no1/runner.py --scheduled
 
       - name: Run manual agent pass
@@ -64,14 +80,14 @@ jobs:
 
       - name: Save reply history
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: data
           key: growth-state-${{ runner.os }}-${{ github.run_id }}
 
       - name: Upload dry-run evidence (screenshots + sanitized reports)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-dry-run-evidence
           path: artifacts/playwright/

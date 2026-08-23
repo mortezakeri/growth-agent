@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -59,7 +60,190 @@ def load() -> dict:
             data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
         else:
             data = {}
-    return _deep_merge(_DEFAULTS, data)
+    # Overlay safe cloud runtime state (data/cloud_runtime.json) on top.
+    return _deep_merge(_deep_merge(_DEFAULTS, data), _load_cloud_overlay())
+
+
+CLOUD_RUNTIME_PATH = ROOT / "data" / "cloud_runtime.json"
+
+# Only these keys may live in the cloud overlay — never cookies/tokens/keys.
+# metrics removed entirely: unrestricted nested dict, unused in runtime flow,
+# and too easy to smuggle secret-like strings under arbitrary metric names.
+_CLOUD_SAFE_KEYS = {"update_offset", "paused", "working_windows", "drafts",
+                    "last_run", "last_successful_run", "last_scout_count",
+                    "last_error_summary", "updated_at"}
+
+
+def _safe_drafts(value) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    out = {}
+    prompt = value.get("skill_prompt")
+    style = value.get("style_override")
+    if prompt is None or isinstance(prompt, str):
+        out["skill_prompt"] = prompt[:500] if isinstance(prompt, str) else None
+    if style is None or style in ("witty", "analytical", "supportive", "custom"):
+        out["style_override"] = style
+    return out
+
+
+def _safe_time(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        hour, minute = (int(part) for part in value.split(":"))
+    except (ValueError, TypeError):
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _safe_windows(value) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    out = []
+    for window in value:
+        if not isinstance(window, dict):
+            continue
+        name = window.get("name")
+        start, end = _safe_time(window.get("start")), _safe_time(window.get("end"))
+        cap = window.get("max_replies")
+        if (name not in ("morning", "evening") or not start or not end or
+                isinstance(cap, bool) or not isinstance(cap, int) or not 0 <= cap <= 100):
+            continue
+        out.append({"name": name, "start": start, "end": end,
+                    "crosses_midnight": end < start, "max_replies": cap})
+    return out
+
+
+def _sanitize_cloud_state(raw) -> dict:
+    """Return a fully allow-listed, JSON-safe cloud state."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {k: v for k, v in raw.items()
+           if k in ("last_run", "last_successful_run", "updated_at")
+           and isinstance(v, str)}
+    offset = raw.get("update_offset")
+    if isinstance(offset, int) and not isinstance(offset, bool) and offset >= 0:
+        out["update_offset"] = offset
+    if isinstance(raw.get("paused"), bool):
+        out["paused"] = raw["paused"]
+    count = raw.get("last_scout_count")
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+        out["last_scout_count"] = count
+    error = raw.get("last_error_summary")
+    if isinstance(error, str):
+        out["last_error_summary"] = error[:300]
+    if "drafts" in raw:
+        out["drafts"] = _safe_drafts(raw["drafts"])
+    if "working_windows" in raw:
+        out["working_windows"] = _safe_windows(raw["working_windows"])
+    return out
+
+
+def _load_cloud_overlay() -> dict:
+    try:
+        raw = json.loads(CLOUD_RUNTIME_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    clean = _sanitize_cloud_state(raw)
+    overlay = {}
+    if isinstance(clean.get("working_windows"), list):
+        overlay["working_windows"] = clean["working_windows"]
+    if isinstance(clean.get("drafts"), dict):
+        overlay["drafts"] = {k: v for k, v in clean["drafts"].items()
+                             if k in ("skill_prompt", "style_override")}
+    return overlay
+
+
+def load_cloud_state() -> dict:
+    """Raw cloud state (offset, paused, counters) for telegram_once/runner.
+
+    Hardened: invalid update_offset does not crash (defaults to 0); paused
+    only accepts a real Python bool (so "false" does not become True); malformed
+    state types fall back safely without echoing bad values.
+    """
+    try:
+        state = json.loads(CLOUD_RUNTIME_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {}
+
+    # update_offset: must be a non-negative int; everything else silently -> 0.
+    raw_offset = state.get("update_offset")
+    if isinstance(raw_offset, bool):
+        # JSON booleans are a distinct type from int in Python — treat as 0.
+        update_offset = 0
+    elif isinstance(raw_offset, int) and not isinstance(raw_offset, bool):
+        update_offset = max(0, raw_offset)
+    else:
+        update_offset = 0
+
+    # paused: only a real Python bool counts; truthy strings like "false"
+    # must NOT flip the state.
+    paused = False
+    raw_paused = state.get("paused")
+    if isinstance(raw_paused, bool):
+        paused = raw_paused
+
+    def _safe_text(v) -> str:
+        if not isinstance(v, str):
+            return ""
+        return v[:300]
+
+    def _safe_ts(v) -> str | None:
+        if isinstance(v, str) and v:
+            return v
+        return None
+
+    return {
+        "update_offset": update_offset,
+        "paused": paused,
+        "last_run": _safe_ts(state.get("last_run")),
+        "last_successful_run": _safe_ts(state.get("last_successful_run")),
+        "last_scout_count": int(state["last_scout_count"])
+        if isinstance(state.get("last_scout_count"), (int, float)) else None,
+        "last_error_summary": _safe_text(state.get("last_error_summary")),
+        "updated_at": _safe_ts(state.get("updated_at")),
+    }
+
+
+def save_cloud_state(**updates) -> dict:
+    """Persist safe values only.
+
+    Security: the ENTIRE existing state file is sanitized against the top-level
+    allow-list before the new updates are merged. This closes a TOCTOU class
+    where unknown fields injected into cloud_runtime.json (cookies, auth tokens,
+    API keys, authorization headers, arbitrary unknown keys) would otherwise
+    survive across saves — they are removed on the next write.
+    """
+    with _LOCK:
+        CLOUD_RUNTIME_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            state = json.loads(CLOUD_RUNTIME_PATH.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            state = {}
+
+        # 1. Sanitize the entire existing state, including nested structures.
+        state = _sanitize_cloud_state(state)
+
+        # 2. Drop keys from the incoming patch that are not in the allow-list.
+        safe = {k: v for k, v in updates.items() if k in _CLOUD_SAFE_KEYS}
+
+        # 3. Deep-sanitize nested structures the allow-list permits.
+        if "drafts" in safe:
+            safe["drafts"] = _safe_drafts(safe["drafts"])
+        if "working_windows" in safe:
+            safe["working_windows"] = _safe_windows(safe["working_windows"])
+        if "last_error_summary" in safe:
+            safe["last_error_summary"] = str(safe["last_error_summary"])[:300]
+
+        state.update(safe)
+        state["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        tmp = CLOUD_RUNTIME_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(CLOUD_RUNTIME_PATH)
+        return state
 
 
 def save(mutator) -> dict:

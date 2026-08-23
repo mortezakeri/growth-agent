@@ -44,6 +44,21 @@ def delivery_allowed(draft_source: str, dry_run: bool) -> bool:
     return dry_run or draft_source == "llm"
 
 
+def scheduled_decision() -> tuple[bool, str, dict, object | None]:
+    """Cloud-aware preflight shared by the workflow and --scheduled."""
+    import runtime_config
+    cloud = runtime_config.load_cloud_state()
+    cfg = runtime_config.load()
+    if cloud["paused"]:
+        return False, "paused", cfg, None
+    sched = TehranScheduler([(w["name"], w["start"], w["end"])
+                             for w in cfg["working_windows"]])
+    check = sched.check()
+    if not check.in_window:
+        return False, "outside_window", cfg, check
+    return True, "in_window", cfg, check
+
+
 def notify_telegram(text: str) -> bool:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
@@ -181,8 +196,16 @@ def main() -> int:
     ap.add_argument("--once", action="store_true", help="single pass, ignore windows")
     ap.add_argument("--scheduled", action="store_true", help="single pass only inside a working window")
     ap.add_argument("--loop", action="store_true", help="continuous, window-aware")
+    ap.add_argument("--scheduled-check", action="store_true",
+                    help="print GitHub output deciding whether browser work is needed")
     args = ap.parse_args()
     cfg = load_settings()
+
+    if args.scheduled_check:
+        should_run, reason, _cfg, _check = scheduled_decision()
+        print(f"should_run={'true' if should_run else 'false'}")
+        print(f"reason={reason}")
+        return 0
 
     if args.once:
         check = TehranScheduler([(w["name"], w["start"], w["end"])
@@ -193,13 +216,22 @@ def main() -> int:
         return 0
 
     if args.scheduled:
-        sched = TehranScheduler([(w["name"], w["start"], w["end"])
-                                 for w in cfg["working_windows"]])
-        check = sched.check()
-        if not check.in_window:
-            print("outside Tehran working window; scheduled pass skipped")
+        import runtime_config
+        should_run, reason, cfg, check = scheduled_decision()
+        if not should_run:
+            print(f"scheduled pass skipped: {reason}")
             return 0
-        stats = run_pass(cfg, check.window_name)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            stats = run_pass(cfg, check.window_name)
+        except Exception as exc:
+            runtime_config.save_cloud_state(last_run=now,
+                                            last_error_summary=type(exc).__name__)
+            raise
+        runtime_config.save_cloud_state(last_run=now,
+                                        last_successful_run=now,
+                                        last_scout_count=stats.get("scouted", 0),
+                                        last_error_summary="")
         notify_telegram("growth-no1 scheduled run complete\n" + "\n".join(
             f"{key}: {value}" for key, value in stats.items()))
         return 0

@@ -75,8 +75,10 @@ def test_vision_heuristic():
 def test_runtime_config_persistence(tmp_path):
     original = runtime_config.SETTINGS_PATH
     original_secrets = runtime_config.SECRETS_PATH
+    original_cloud = runtime_config.CLOUD_RUNTIME_PATH
     runtime_config.SETTINGS_PATH = tmp_path / "settings.json"
     runtime_config.SECRETS_PATH = tmp_path / "secrets.json"
+    runtime_config.CLOUD_RUNTIME_PATH = tmp_path / "cloud_runtime.json"
     try:
         runtime_config.set_window_limit("morning", 7)
         runtime_config.set_window_hours("evening", "13:15", "00:45")
@@ -95,6 +97,7 @@ def test_runtime_config_persistence(tmp_path):
     finally:
         runtime_config.SETTINGS_PATH = original
         runtime_config.SECRETS_PATH = original_secrets
+        runtime_config.CLOUD_RUNTIME_PATH = original_cloud
 
 
 if __name__ == "__main__":
