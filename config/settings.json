@@ -28,7 +28,7 @@
     "api_key_env": "GEMINI_API_KEY"
   },
   "reply": {
-    "enabled": true,
+    "enabled": false,
     "dry_run": false,
     "headless": true,
     "max_replies_per_pass": 1,

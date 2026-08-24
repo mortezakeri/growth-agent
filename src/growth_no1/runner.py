@@ -69,6 +69,8 @@ def session_decision() -> tuple[bool, str, dict, object | None]:
     """
     import runtime_config
     cfg = runtime_config.load()
+    if not cfg.get("reply", {}).get("enabled", False):
+        return False, "agent_disabled", cfg, None
     sched = TehranScheduler([(w["name"], w["start"], w["end"])
                              for w in cfg["working_windows"]])
     check = sched.check()
